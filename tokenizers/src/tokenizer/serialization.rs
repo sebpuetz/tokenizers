@@ -1,15 +1,19 @@
 use super::{added_vocabulary::AddedTokenWithId, Tokenizer};
-use crate::models::bpe::BPE;
+use crate::Model;
 use serde::{
     self,
     de::{Error, MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::marker::PhantomData;
 
 static SERIALIZATION_VERSION: &str = "1.0";
 
-impl Serialize for Tokenizer {
+impl<T> Serialize for Tokenizer<T>
+where
+    T: Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -37,7 +41,10 @@ impl Serialize for Tokenizer {
     }
 }
 
-impl<'de> Deserialize<'de> for Tokenizer {
+impl<'de, T> Deserialize<'de> for Tokenizer<T>
+where
+    T: Deserialize<'de> + Default + Model,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -55,14 +62,18 @@ impl<'de> Deserialize<'de> for Tokenizer {
                 "decoder",
                 "model",
             ],
-            TokenizerVisitor,
+            TokenizerVisitor(PhantomData),
         )
     }
 }
 
-struct TokenizerVisitor;
-impl<'de> Visitor<'de> for TokenizerVisitor {
-    type Value = Tokenizer;
+struct TokenizerVisitor<T>(PhantomData<T>);
+
+impl<'de, T> Visitor<'de> for TokenizerVisitor<T>
+where
+    T: Deserialize<'de> + Default + Model,
+{
+    type Value = Tokenizer<T>;
 
     fn expecting(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(fmt, "struct Tokenizer")
@@ -72,7 +83,7 @@ impl<'de> Visitor<'de> for TokenizerVisitor {
     where
         V: MapAccess<'de>,
     {
-        let mut tokenizer = Tokenizer::new(Box::new(BPE::default()));
+        let mut tokenizer = Tokenizer::new(T::default());
         let mut tokens: Vec<AddedTokenWithId> = vec![];
         while let Some(key) = map.next_key::<String>()? {
             match key.as_ref() {

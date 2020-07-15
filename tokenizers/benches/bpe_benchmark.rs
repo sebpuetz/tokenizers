@@ -13,8 +13,8 @@ use tokenizers::tokenizer::{AddedToken, EncodeInput, Tokenizer, Trainer};
 
 static BATCH_SIZE: usize = 1_000;
 
-fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer {
-    let mut tokenizer = Tokenizer::new(Box::new(bpe));
+fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer<BPE> {
+    let mut tokenizer = Tokenizer::new(bpe);
     tokenizer.with_pre_tokenizer(Box::new(ByteLevel::default()));
     tokenizer.with_decoder(Box::new(ByteLevel::default()));
     tokenizer.add_tokens(&[AddedToken::from("ing", false).single_word(false)]);
@@ -22,7 +22,7 @@ fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer {
     tokenizer
 }
 
-fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer, lines: &[EncodeInput]) -> Duration {
+fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer<BPE>, lines: &[EncodeInput]) -> Duration {
     let mut duration = Duration::new(0, 0);
     let mut line_index: usize = 0;
     for _i in 0..iters {
@@ -39,7 +39,7 @@ fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer, lines: &[EncodeInput]) -
 
 fn iter_bench_encode_batch(
     iters: u64,
-    tokenizer: &Tokenizer,
+    tokenizer: &Tokenizer<BPE>,
     batches: &[Vec<EncodeInput>],
 ) -> Duration {
     let mut duration = Duration::new(0, 0);
@@ -98,8 +98,8 @@ fn bench_gpt2(c: &mut Criterion) {
 #[allow(clippy::borrowed_box)]
 fn iter_bench_train(
     iters: u64,
-    tokenizer: &mut Tokenizer,
-    trainer: &Box<dyn Trainer>,
+    tokenizer: &mut Tokenizer<BPE>,
+    trainer: &Box<dyn Trainer<Model = BPE>>,
     files: Vec<String>,
 ) -> Duration {
     let mut duration = Duration::new(0, 0);
@@ -112,10 +112,10 @@ fn iter_bench_train(
 }
 
 fn bench_train(c: &mut Criterion) {
-    let mut tokenizer = Tokenizer::new(Box::new(BPE::default()));
+    let mut tokenizer = Tokenizer::new(BPE::default());
     tokenizer.with_pre_tokenizer(Box::new(Whitespace));
 
-    let trainer: Box<dyn Trainer> =
+    let trainer: Box<dyn Trainer<Model = BPE>> =
         Box::new(BpeTrainerBuilder::default().show_progress(false).build());
     c.bench_function("BPE Train vocabulary (small)", |b| {
         b.iter_custom(|iters| {

@@ -10,11 +10,12 @@ use tokenizers::models::bpe::{BpeTrainerBuilder, BPE};
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::tokenizer::{AddedToken, EncodeInput, Tokenizer, Trainer};
+use std::sync::Arc;
 
 static BATCH_SIZE: usize = 1_000;
 
 fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer {
-    let mut tokenizer = Tokenizer::new(Box::new(bpe));
+    let mut tokenizer = Tokenizer::new(Arc::new(bpe));
     tokenizer.with_pre_tokenizer(Box::new(ByteLevel::default()));
     tokenizer.with_decoder(Box::new(ByteLevel::default()));
     tokenizer.add_tokens(&[AddedToken::from("ing", false).single_word(false)]);
@@ -112,7 +113,7 @@ fn iter_bench_train(
 }
 
 fn bench_train(c: &mut Criterion) {
-    let mut tokenizer = Tokenizer::new(Box::new(BPE::default()));
+    let mut tokenizer = Tokenizer::new(Arc::new(BPE::default()));
     tokenizer.with_pre_tokenizer(Box::new(Whitespace));
 
     let trainer: Box<dyn Trainer> =

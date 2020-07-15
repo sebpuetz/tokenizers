@@ -2,12 +2,14 @@ extern crate tokenizers as tk;
 
 use super::encoding::Encoding;
 use super::error::ToPyResult;
-use super::utils::Container;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tk::parallelism::*;
+use std::sync::Arc;
+use std::collections::hash_map::RandomState;
+use std::collections::HashMap;
 
 #[pyclass]
 struct EncodeInput {
@@ -78,7 +80,7 @@ impl<'source> FromPyObject<'source> for EncodeInput {
 /// This class cannot be constructed directly. Please use one of the concrete models.
 #[pyclass(module = "tokenizers.models")]
 pub struct Model {
-    pub model: Container<dyn tk::tokenizer::Model>,
+    pub model: Arc<dyn tk::tokenizer::Model>,
 }
 
 #[pymethods]
@@ -88,14 +90,12 @@ impl Model {
         // Instantiate a default empty model. This doesn't really make sense, but we need
         // to be able to instantiate an empty model for pickle capabilities.
         Ok(Model {
-            model: Container::Owned(Box::new(tk::models::bpe::BPE::default())),
+            model: Arc::new(tk::models::bpe::BPE::default()),
         })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        let data = self
-            .model
-            .execute(|model| serde_json::to_string(&model))
+        let data = serde_json::to_string(self.model.as_ref())
             .map_err(|e| {
                 exceptions::Exception::py_err(format!(
                     "Error while attempting to pickle Model: {}",
@@ -109,12 +109,12 @@ impl Model {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
                 self.model =
-                    Container::Owned(serde_json::from_slice(s.as_bytes()).map_err(|e| {
+                    serde_json::from_slice(s.as_bytes()).map_err(|e| {
                         exceptions::Exception::py_err(format!(
                             "Error while attempting to unpickle Model: {}",
                             e.to_string()
                         ))
-                    })?);
+                    })?;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -123,8 +123,7 @@ impl Model {
 
     fn save(&self, folder: &str, name: Option<&str>) -> PyResult<Vec<String>> {
         let saved: PyResult<Vec<_>> = ToPyResult(
-            self.model
-                .execute(|model| model.save(Path::new(folder), name)),
+            self.model.save(Path::new(folder), name),
         )
         .into();
 
@@ -141,32 +140,25 @@ impl Model {
         if sequence.is_empty() {
             return Ok(tk::tokenizer::Encoding::default().into());
         }
-
-        ToPyResult(self.model.execute(|model| {
-            model
-                .tokenize(sequence)
-                .map(|tokens| tk::tokenizer::Encoding::from_tokens(tokens, type_id).into())
-        }))
-        .into()
+        ToPyResult(self.model.tokenize(sequence).map(|tokens| tk::tokenizer::Encoding::from_tokens(tokens, type_id).into())).into()
     }
 
     #[args(type_id = 0)]
     fn encode_batch(&self, sequences: Vec<EncodeInput>, type_id: u32) -> PyResult<Vec<Encoding>> {
-        ToPyResult(self.model.execute(|model| {
-            sequences
-                .into_maybe_par_iter()
-                .map(|sequence| {
-                    let sequence = sequence.into_input();
-                    if sequence.is_empty() {
-                        Ok(tk::tokenizer::Encoding::default().into())
-                    } else {
-                        model.tokenize(sequence).map(|tokens| {
-                            tk::tokenizer::Encoding::from_tokens(tokens, type_id).into()
-                        })
-                    }
-                })
-                .collect::<Result<_, _>>()
-        }))
+        ToPyResult(sequences
+            .into_maybe_par_iter()
+            .map(|sequence| {
+                let sequence = sequence.into_input();
+                if sequence.is_empty() {
+                    Ok(tk::tokenizer::Encoding::default().into())
+                } else {
+                    self.model.tokenize(sequence).map(|tokens| {
+                        tk::tokenizer::Encoding::from_tokens(tokens, type_id).into()
+                    })
+                }
+            })
+            .collect::<Result<_, _>>()
+        )
         .into()
     }
 }
@@ -227,7 +219,7 @@ impl BPE {
             Ok(bpe) => Ok((
                 BPE {},
                 Model {
-                    model: Container::Owned(Box::new(bpe)),
+                    model: Arc::new(bpe),
                 },
             )),
         }
@@ -277,7 +269,7 @@ impl WordPiece {
             Ok(wordpiece) => Ok((
                 WordPiece {},
                 Model {
-                    model: Container::Owned(Box::new(wordpiece)),
+                    model: Arc::new(wordpiece),
                 },
             )),
         }
@@ -315,7 +307,7 @@ impl WordLevel {
                 Ok(model) => Ok((
                     WordLevel {},
                     Model {
-                        model: Container::Owned(Box::new(model)),
+                        model: Arc::new(model),
                     },
                 )),
             }
@@ -323,7 +315,7 @@ impl WordLevel {
             Ok((
                 WordLevel {},
                 Model {
-                    model: Container::Owned(Box::new(tk::models::wordlevel::WordLevel::default())),
+                    model: Arc::new(tk::models::wordlevel::WordLevel::default()),
                 },
             ))
         }

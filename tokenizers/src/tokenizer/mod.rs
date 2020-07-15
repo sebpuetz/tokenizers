@@ -36,6 +36,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub type Offsets = (usize, usize);
 
 use crate::utils::parallelism::*;
+use std::sync::Arc;
 
 #[typetag::serde(tag = "type")]
 /// Takes care of pre-processing strings.
@@ -107,7 +108,7 @@ pub trait Trainer: Sync {
     fn should_show_progress(&self) -> bool;
     /// The actual training method. This will return a new trained Model as well as a list
     /// of `special_tokens` to be added directly to the tokenizer along with the model.
-    fn train(&self, words: HashMap<String, u32>) -> Result<(Box<dyn Model>, Vec<AddedToken>)>;
+    fn train(&self, words: HashMap<String, u32>) -> Result<(Arc<dyn Model>, Vec<AddedToken>)>;
     /// Process a bunch of token, counting them as relevant.
     fn process_tokens(&self, words: &mut HashMap<String, u32>, tokens: Vec<String>);
 }
@@ -189,7 +190,7 @@ pub struct Tokenizer {
     // Tokenizer parts
     normalizer: Option<Box<dyn Normalizer>>,
     pre_tokenizer: Option<Box<dyn PreTokenizer>>,
-    model: Box<dyn Model>,
+    model: Arc<dyn Model>,
     post_processor: Option<Box<dyn PostProcessor>>,
     decoder: Option<Box<dyn Decoder>>,
 
@@ -211,7 +212,7 @@ impl std::str::FromStr for Tokenizer {
 
 impl Tokenizer {
     /// Instantiate a new Tokenizer, with the given Model
-    pub fn new(model: Box<dyn Model>) -> Self {
+    pub fn new(model: Arc<dyn Model>) -> Self {
         Tokenizer {
             normalizer: None,
             pre_tokenizer: None,
@@ -301,15 +302,15 @@ impl Tokenizer {
     }
 
     /// Set the model
-    pub fn with_model(&mut self, model: Box<dyn Model>) -> &Self {
+    pub fn with_model(&mut self, model: Arc<dyn Model>) -> &Self {
         self.model = model;
         self
     }
 
     /// Get the model
     #[allow(clippy::borrowed_box)]
-    pub fn get_model(&self) -> &Box<dyn Model> {
-        &self.model
+    pub fn get_model(&self) -> Arc<dyn Model> {
+        self.model.clone()
     }
 
     /// Set the truncation parameters
@@ -488,7 +489,8 @@ impl Tokenizer {
     /// ```
     /// # use tokenizers::Tokenizer;
     /// # use tokenizers::models::bpe::BPE;
-    /// # let tokenizer = Tokenizer::new(Box::new(BPE::default()));
+    /// # use std::sync::Arc;
+    /// # let tokenizer = Tokenizer::new(Arc::new(BPE::default()));
     /// #
     /// // Sequences:
     /// tokenizer.encode("Single sequence", false);

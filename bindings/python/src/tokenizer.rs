@@ -19,6 +19,7 @@ use super::utils::Container;
 use tk::tokenizer::{
     PaddingDirection, PaddingParams, PaddingStrategy, TruncationParams, TruncationStrategy,
 };
+use std::sync::Arc;
 
 #[pyclass(dict, module = "tokenizers")]
 pub struct AddedToken {
@@ -274,15 +275,9 @@ pub struct Tokenizer {
 #[pymethods]
 impl Tokenizer {
     #[new]
-    fn new(mut model: PyRefMut<Model>) -> PyResult<Self> {
-        if let Some(model) = model.model.to_pointer() {
-            let tokenizer = tk::tokenizer::Tokenizer::new(model);
-            Ok(Tokenizer { tokenizer })
-        } else {
-            Err(exceptions::Exception::py_err(
-                "The Model is already being used in another Tokenizer",
-            ))
-        }
+    fn new(model: PyRefMut<Model>) -> PyResult<Self> {
+        let tokenizer = tk::tokenizer::Tokenizer::new(model.model.clone());
+        Ok(Tokenizer { tokenizer })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
@@ -312,7 +307,7 @@ impl Tokenizer {
 
     fn __getnewargs__<'p>(&self, py: Python<'p>) -> PyResult<&'p PyTuple> {
         let model: PyObject = crate::models::Model {
-            model: Container::Owned(Box::new(tk::models::bpe::BPE::default())),
+            model: Arc::new(tk::models::bpe::BPE::default()),
         }
         .into_py(py);
         let args = PyTuple::new(py, vec![model]);
@@ -691,20 +686,14 @@ impl Tokenizer {
     #[getter]
     fn get_model(&self) -> PyResult<Model> {
         Ok(Model {
-            model: Container::from_ref(self.tokenizer.get_model()),
+            model: self.tokenizer.get_model(),
         })
     }
 
     #[setter]
-    fn set_model(&mut self, mut model: PyRefMut<Model>) -> PyResult<()> {
-        if let Some(model) = model.model.to_pointer() {
-            self.tokenizer.with_model(model);
-            Ok(())
-        } else {
-            Err(exceptions::Exception::py_err(
-                "The Model is already being used in another Tokenizer",
-            ))
-        }
+    fn set_model(&mut self, model: PyRefMut<Model>) -> PyResult<()> {
+        self.tokenizer.with_model(model.model.clone());
+        Ok(())
     }
 
     #[getter]

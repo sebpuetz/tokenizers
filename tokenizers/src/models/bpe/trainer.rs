@@ -6,6 +6,7 @@ use crate::tokenizer::{AddedToken, Model, Result, Trainer};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Debug, Eq)]
 struct Merge {
@@ -579,9 +580,9 @@ impl Trainer for BpeTrainer {
     fn train(
         &self,
         word_counts: HashMap<String, u32>,
-    ) -> Result<(Box<dyn Model>, Vec<AddedToken>)> {
+    ) -> Result<(Arc<dyn Model>, Vec<AddedToken>)> {
         let (bpe, tokens) = self.train(word_counts)?;
-        Ok((Box::new(bpe), tokens))
+        Ok((Arc::new(bpe), tokens))
     }
 
     /// Process a bunch of tokens, counting them

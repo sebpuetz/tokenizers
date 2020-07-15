@@ -6,6 +6,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::sync::Arc;
 
 static SERIALIZATION_VERSION: &str = "1.0";
 
@@ -72,7 +73,7 @@ impl<'de> Visitor<'de> for TokenizerVisitor {
     where
         V: MapAccess<'de>,
     {
-        let mut tokenizer = Tokenizer::new(Box::new(BPE::default()));
+        let mut tokenizer = Tokenizer::new(Arc::new(BPE::default()));
         let mut tokens: Vec<AddedTokenWithId> = vec![];
         while let Some(key) = map.next_key::<String>()? {
             match key.as_ref() {

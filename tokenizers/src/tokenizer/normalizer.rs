@@ -304,9 +304,6 @@ impl NormalizedString {
         let mut filtered = self
             .normalized
             .chars()
-            // We need to collect here to be able to reverse the iterator because Char is not ended
-            .collect::<Vec<_>>()
-            .into_iter()
             .rev()
             .map(|c| {
                 let keep = filter(&c);

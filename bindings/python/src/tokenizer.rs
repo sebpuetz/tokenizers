@@ -16,6 +16,8 @@ use super::processors::PostProcessor;
 use super::trainers::Trainer;
 use super::utils::Container;
 
+use crate::models::PyModelWrapper;
+use std::sync::Arc;
 use tk::tokenizer::{
     PaddingDirection, PaddingParams, PaddingStrategy, TruncationParams, TruncationStrategy,
 };
@@ -268,21 +270,15 @@ impl From<PreTokenizedEncodeInput> for tk::tokenizer::EncodeInput {
 
 #[pyclass(dict, module = "tokenizers")]
 pub struct Tokenizer {
-    tokenizer: tk::tokenizer::Tokenizer,
+    tokenizer: tk::tokenizer::Tokenizer<PyModelWrapper>,
 }
 
 #[pymethods]
 impl Tokenizer {
     #[new]
-    fn new(mut model: PyRefMut<Model>) -> PyResult<Self> {
-        if let Some(model) = model.model.to_pointer() {
-            let tokenizer = tk::tokenizer::Tokenizer::new(model);
-            Ok(Tokenizer { tokenizer })
-        } else {
-            Err(exceptions::Exception::py_err(
-                "The Model is already being used in another Tokenizer",
-            ))
-        }
+    fn new(model: PyRefMut<Model>) -> PyResult<Self> {
+        let tokenizer = tk::tokenizer::Tokenizer::new(model.model.clone());
+        Ok(Tokenizer { tokenizer })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
@@ -312,7 +308,9 @@ impl Tokenizer {
 
     fn __getnewargs__<'p>(&self, py: Python<'p>) -> PyResult<&'p PyTuple> {
         let model: PyObject = crate::models::Model {
-            model: Container::Owned(Box::new(tk::models::bpe::BPE::default())),
+            model: PyModelWrapper {
+                inner: Arc::new(tk::models::bpe::BPE::default().into()),
+            },
         }
         .into_py(py);
         let args = PyTuple::new(py, vec![model]);
@@ -321,7 +319,7 @@ impl Tokenizer {
 
     #[staticmethod]
     fn from_str(s: &str) -> PyResult<Self> {
-        let tokenizer: PyResult<tk::tokenizer::Tokenizer> = ToPyResult(s.parse()).into();
+        let tokenizer: PyResult<_> = ToPyResult(s.parse()).into();
         Ok(Self {
             tokenizer: tokenizer?,
         })
@@ -337,13 +335,12 @@ impl Tokenizer {
 
     #[staticmethod]
     fn from_buffer(buffer: &PyBytes) -> PyResult<Self> {
-        let tokenizer: tk::tokenizer::Tokenizer = serde_json::from_slice(buffer.as_bytes())
-            .map_err(|e| {
-                exceptions::Exception::py_err(format!(
-                    "Cannot instantiate Tokenizer from buffer: {}",
-                    e.to_string()
-                ))
-            })?;
+        let tokenizer = serde_json::from_slice(buffer.as_bytes()).map_err(|e| {
+            exceptions::Exception::py_err(format!(
+                "Cannot instantiate Tokenizer from buffer: {}",
+                e.to_string()
+            ))
+        })?;
         Ok(Self { tokenizer })
     }
 
@@ -660,13 +657,9 @@ impl Tokenizer {
     }
 
     fn train(&mut self, trainer: &Trainer, files: Vec<String>) -> PyResult<()> {
-        trainer.trainer.execute(|trainer| {
-            if let Err(e) = self.tokenizer.train(trainer, files) {
-                Err(exceptions::Exception::py_err(format!("{}", e)))
-            } else {
-                Ok(())
-            }
-        })
+        self.tokenizer
+            .train(&trainer.trainer, files)
+            .map_err(|e| exceptions::Exception::py_err(format!("{}", e)))
     }
 
     #[args(pair = "None", add_special_tokens = true)]
@@ -691,20 +684,14 @@ impl Tokenizer {
     #[getter]
     fn get_model(&self) -> PyResult<Model> {
         Ok(Model {
-            model: Container::from_ref(self.tokenizer.get_model()),
+            model: self.tokenizer.get_model().clone(),
         })
     }
 
     #[setter]
-    fn set_model(&mut self, mut model: PyRefMut<Model>) -> PyResult<()> {
-        if let Some(model) = model.model.to_pointer() {
-            self.tokenizer.with_model(model);
-            Ok(())
-        } else {
-            Err(exceptions::Exception::py_err(
-                "The Model is already being used in another Tokenizer",
-            ))
-        }
+    fn set_model(&mut self, model: PyRefMut<Model>) -> PyResult<()> {
+        self.tokenizer.with_model(model.model.clone());
+        Ok(())
     }
 
     #[getter]

@@ -2,12 +2,16 @@ extern crate tokenizers as tk;
 
 use super::encoding::Encoding;
 use super::error::ToPyResult;
-use super::utils::Container;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::*;
-use std::path::Path;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tk::parallelism::*;
+use tokenizers::models::ModelWrapper;
+use tokenizers::Model as TkModel;
 
 #[pyclass]
 struct EncodeInput {
@@ -78,7 +82,62 @@ impl<'source> FromPyObject<'source> for EncodeInput {
 /// This class cannot be constructed directly. Please use one of the concrete models.
 #[pyclass(module = "tokenizers.models")]
 pub struct Model {
-    pub model: Container<dyn tk::tokenizer::Model>,
+    pub model: PyModelWrapper,
+}
+
+#[derive(Clone, Default)]
+pub struct PyModelWrapper {
+    pub inner: Arc<ModelWrapper>,
+}
+
+impl Serialize for PyModelWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PyModelWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(PyModelWrapper {
+            inner: Arc::new(ModelWrapper::deserialize(deserializer)?),
+        })
+    }
+}
+
+#[typetag::serde]
+impl TkModel for PyModelWrapper {
+    fn tokenize(
+        &self,
+        tokens: Vec<(String, (usize, usize))>,
+    ) -> tk::tokenizer::Result<Vec<tk::Token>> {
+        self.inner.tokenize(tokens)
+    }
+
+    fn token_to_id(&self, token: &str) -> Option<u32> {
+        self.inner.token_to_id(token)
+    }
+
+    fn id_to_token(&self, id: u32) -> Option<&str> {
+        self.inner.id_to_token(id)
+    }
+
+    fn get_vocab(&self) -> &HashMap<String, u32> {
+        self.inner.get_vocab()
+    }
+
+    fn get_vocab_size(&self) -> usize {
+        self.inner.get_vocab_size()
+    }
+
+    fn save(&self, folder: &Path, name: Option<&str>) -> tk::tokenizer::Result<Vec<PathBuf>> {
+        self.inner.save(folder, name)
+    }
 }
 
 #[pymethods]
@@ -88,33 +147,31 @@ impl Model {
         // Instantiate a default empty model. This doesn't really make sense, but we need
         // to be able to instantiate an empty model for pickle capabilities.
         Ok(Model {
-            model: Container::Owned(Box::new(tk::models::bpe::BPE::default())),
+            model: PyModelWrapper {
+                inner: Arc::new(ModelWrapper::default()),
+            },
         })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        let data = self
-            .model
-            .execute(|model| serde_json::to_string(&model))
-            .map_err(|e| {
-                exceptions::Exception::py_err(format!(
-                    "Error while attempting to pickle Model: {}",
-                    e.to_string()
-                ))
-            })?;
+        let data = serde_json::to_string(self.model.inner.as_ref()).map_err(|e| {
+            exceptions::Exception::py_err(format!(
+                "Error while attempting to pickle Model: {}",
+                e.to_string()
+            ))
+        })?;
         Ok(PyBytes::new(py, data.as_bytes()).to_object(py))
     }
 
     fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
-                self.model =
-                    Container::Owned(serde_json::from_slice(s.as_bytes()).map_err(|e| {
-                        exceptions::Exception::py_err(format!(
-                            "Error while attempting to unpickle Model: {}",
-                            e.to_string()
-                        ))
-                    })?);
+                self.model = serde_json::from_slice(s.as_bytes()).map_err(|e| {
+                    exceptions::Exception::py_err(format!(
+                        "Error while attempting to unpickle Model: {}",
+                        e.to_string()
+                    ))
+                })?;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -122,11 +179,7 @@ impl Model {
     }
 
     fn save(&self, folder: &str, name: Option<&str>) -> PyResult<Vec<String>> {
-        let saved: PyResult<Vec<_>> = ToPyResult(
-            self.model
-                .execute(|model| model.save(Path::new(folder), name)),
-        )
-        .into();
+        let saved: PyResult<Vec<_>> = ToPyResult(self.model.save(Path::new(folder), name)).into();
 
         Ok(saved?
             .into_iter()
@@ -141,18 +194,18 @@ impl Model {
         if sequence.is_empty() {
             return Ok(tk::tokenizer::Encoding::default().into());
         }
-
-        ToPyResult(self.model.execute(|model| {
-            model
+        ToPyResult(
+            self.model
                 .tokenize(sequence)
-                .map(|tokens| tk::tokenizer::Encoding::from_tokens(tokens, type_id).into())
-        }))
+                .map(|tokens| tk::tokenizer::Encoding::from_tokens(tokens, type_id).into()),
+        )
         .into()
     }
 
     #[args(type_id = 0)]
     fn encode_batch(&self, sequences: Vec<EncodeInput>, type_id: u32) -> PyResult<Vec<Encoding>> {
-        ToPyResult(self.model.execute(|model| {
+        let model = self.model.inner.as_ref();
+        ToPyResult(
             sequences
                 .into_maybe_par_iter()
                 .map(|sequence| {
@@ -165,8 +218,8 @@ impl Model {
                         })
                     }
                 })
-                .collect::<Result<_, _>>()
-        }))
+                .collect::<Result<_, _>>(),
+        )
         .into()
     }
 }
@@ -227,7 +280,9 @@ impl BPE {
             Ok(bpe) => Ok((
                 BPE {},
                 Model {
-                    model: Container::Owned(Box::new(bpe)),
+                    model: PyModelWrapper {
+                        inner: Arc::new(bpe.into()),
+                    },
                 },
             )),
         }
@@ -277,7 +332,9 @@ impl WordPiece {
             Ok(wordpiece) => Ok((
                 WordPiece {},
                 Model {
-                    model: Container::Owned(Box::new(wordpiece)),
+                    model: PyModelWrapper {
+                        inner: Arc::new(wordpiece.into()),
+                    },
                 },
             )),
         }
@@ -315,7 +372,9 @@ impl WordLevel {
                 Ok(model) => Ok((
                     WordLevel {},
                     Model {
-                        model: Container::Owned(Box::new(model)),
+                        model: PyModelWrapper {
+                            inner: Arc::new(model.into()),
+                        },
                     },
                 )),
             }
@@ -323,7 +382,9 @@ impl WordLevel {
             Ok((
                 WordLevel {},
                 Model {
-                    model: Container::Owned(Box::new(tk::models::wordlevel::WordLevel::default())),
+                    model: PyModelWrapper {
+                        inner: Arc::new(tk::models::wordlevel::WordLevel::default().into()),
+                    },
                 },
             ))
         }

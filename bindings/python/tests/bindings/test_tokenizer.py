@@ -55,6 +55,13 @@ class TestAddedToken:
 
 
 class TestTokenizer:
+    def test_double_init(self):
+        model = BPE()
+        t = Tokenizer(model)
+        t2 = Tokenizer(model)
+        del t
+        assert callable(t2.model.encode)
+
     def test_has_expected_type_and_methods(self):
         tokenizer = Tokenizer(BPE())
         assert type(tokenizer) == Tokenizer

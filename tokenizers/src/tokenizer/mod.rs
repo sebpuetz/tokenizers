@@ -36,6 +36,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub type Offsets = (usize, usize);
 
 use crate::utils::parallelism::*;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 #[typetag::serde(tag = "type")]
 /// Takes care of pre-processing strings.
@@ -103,11 +105,15 @@ pub trait Decoder: Send + Sync {
 /// A `Trainer` has the responsibility to train a model. We feed it with lines/sentences
 /// and it returns a `Model` when done.
 pub trait Trainer: Sync {
+    type Model: Model;
     /// Whether we should show progress during the training.
     fn should_show_progress(&self) -> bool;
     /// The actual training method. This will return a new trained Model as well as a list
     /// of `special_tokens` to be added directly to the tokenizer along with the model.
-    fn train(&self, words: HashMap<String, u32>) -> Result<(Box<dyn Model>, Vec<AddedToken>)>;
+    fn train(
+        &self,
+        words: HashMap<String, u32>,
+    ) -> Result<(<Self as Trainer>::Model, Vec<AddedToken>)>;
     /// Process a bunch of token, counting them as relevant.
     fn process_tokens(&self, words: &mut HashMap<String, u32>, tokens: Vec<String>);
 }
@@ -185,11 +191,11 @@ impl<I1: Into<InputSequence>, I2: Into<InputSequence>> From<(I1, I2)> for Encode
 }
 
 /// A `Tokenizer` is capable of encoding/decoding any text.
-pub struct Tokenizer {
+pub struct Tokenizer<T> {
     // Tokenizer parts
     normalizer: Option<Box<dyn Normalizer>>,
     pre_tokenizer: Option<Box<dyn PreTokenizer>>,
-    model: Box<dyn Model>,
+    model: T,
     post_processor: Option<Box<dyn PostProcessor>>,
     decoder: Option<Box<dyn Decoder>>,
 
@@ -201,7 +207,10 @@ pub struct Tokenizer {
     padding: Option<PaddingParams>,
 }
 
-impl std::str::FromStr for Tokenizer {
+impl<T> std::str::FromStr for Tokenizer<T>
+where
+    T: for<'de> Deserialize<'de> + Default + Model,
+{
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -209,9 +218,24 @@ impl std::str::FromStr for Tokenizer {
     }
 }
 
-impl Tokenizer {
+impl<T> Tokenizer<T>
+where
+    T: Default + DeserializeOwned + Model,
+{
+    /// Instantiate a new Tokenizer from the given file
+    pub fn from_file<P: AsRef<Path>>(file: P) -> Result<Self> {
+        let file = File::open(file)?;
+        let buf = BufReader::new(file);
+        Ok(serde_json::from_reader(buf)?)
+    }
+}
+
+impl<T> Tokenizer<T>
+where
+    T: Model,
+{
     /// Instantiate a new Tokenizer, with the given Model
-    pub fn new(model: Box<dyn Model>) -> Self {
+    pub fn new(model: T) -> Self {
         Tokenizer {
             normalizer: None,
             pre_tokenizer: None,
@@ -226,15 +250,11 @@ impl Tokenizer {
         }
     }
 
-    /// Instantiate a new Tokenizer from the given file
-    pub fn from_file<P: AsRef<Path>>(file: P) -> Result<Self> {
-        let file = File::open(file)?;
-        let buf = BufReader::new(file);
-        Ok(serde_json::from_reader(buf)?)
-    }
-
     /// Serialize the current tokenizer as a String
-    pub fn to_string(&self, pretty: bool) -> Result<String> {
+    pub fn to_string(&self, pretty: bool) -> Result<String>
+    where
+        T: Serialize,
+    {
         Ok(if pretty {
             serde_json::to_string_pretty(self)?
         } else {
@@ -243,7 +263,10 @@ impl Tokenizer {
     }
 
     /// Save the current tokenizer at the given path
-    pub fn save(&self, path: &str, pretty: bool) -> Result<()> {
+    pub fn save(&self, path: &str, pretty: bool) -> Result<()>
+    where
+        T: Serialize,
+    {
         let serialized = self.to_string(pretty)?;
 
         let mut file = File::create(path)?;
@@ -301,14 +324,13 @@ impl Tokenizer {
     }
 
     /// Set the model
-    pub fn with_model(&mut self, model: Box<dyn Model>) -> &Self {
+    pub fn with_model(&mut self, model: T) -> &Self {
         self.model = model;
         self
     }
 
     /// Get the model
-    #[allow(clippy::borrowed_box)]
-    pub fn get_model(&self) -> &Box<dyn Model> {
+    pub fn get_model(&self) -> &T {
         &self.model
     }
 
@@ -373,13 +395,12 @@ impl Tokenizer {
 
     /// Converts a token in the corresponding id.
     pub fn token_to_id(&self, token: &str) -> Option<u32> {
-        self.added_vocabulary
-            .token_to_id(token, self.model.as_ref())
+        self.added_vocabulary.token_to_id(token, &self.model)
     }
 
     /// Converts an id to the corresponding token.
     pub fn id_to_token(&self, id: u32) -> Option<&str> {
-        self.added_vocabulary.id_to_token(id, self.model.as_ref())
+        self.added_vocabulary.id_to_token(id, &self.model)
     }
 
     /// Normalize the given sentence and return the corresponding normalized string
@@ -488,7 +509,7 @@ impl Tokenizer {
     /// ```
     /// # use tokenizers::Tokenizer;
     /// # use tokenizers::models::bpe::BPE;
-    /// # let tokenizer = Tokenizer::new(Box::new(BPE::default()));
+    /// # let tokenizer = Tokenizer::new(BPE::default());
     /// #
     /// // Sequences:
     /// tokenizer.encode("Single sequence", false);
@@ -551,7 +572,7 @@ impl Tokenizer {
             .into_iter()
             .map(|id| {
                 self.added_vocabulary
-                    .id_to_token(id, self.model.as_ref())
+                    .id_to_token(id, &self.model)
                     .filter(|token| {
                         !skip_special_tokens || !self.added_vocabulary.is_special_token(token)
                     })
@@ -582,11 +603,14 @@ impl Tokenizer {
 
     /// Train a model and replace our current Model, using the given Trainer
     #[allow(clippy::borrowed_box)]
-    fn word_count(
+    fn word_count<M>(
         &mut self,
-        trainer: &Box<dyn Trainer>,
+        trainer: &Box<dyn Trainer<Model = M>>,
         files: Vec<String>,
-    ) -> Result<HashMap<String, u32>> {
+    ) -> Result<HashMap<String, u32>>
+    where
+        M: Model,
+    {
         let max_read = 1_000_000;
         let len: u64 = files
             .iter()
@@ -663,7 +687,11 @@ impl Tokenizer {
 
     /// Train a model and replace our current Model, using the given Trainer
     #[allow(clippy::borrowed_box)]
-    pub fn train(&mut self, trainer: &Box<dyn Trainer>, files: Vec<String>) -> Result<()> {
+    pub fn train(
+        &mut self,
+        trainer: &Box<dyn Trainer<Model = T>>,
+        files: Vec<String>,
+    ) -> Result<()> {
         let words = self.word_count(trainer, files)?;
 
         let (model, special_tokens) = trainer.train(words)?;
@@ -745,16 +773,13 @@ impl Tokenizer {
     /// Register the given tokens as special tokens. This is especially useful for removing
     /// these special tokens while decoding
     pub fn add_special_tokens(&mut self, tokens: &[AddedToken]) -> usize {
-        self.added_vocabulary.add_special_tokens(
-            tokens,
-            self.model.as_ref(),
-            self.normalizer.as_deref(),
-        )
+        self.added_vocabulary
+            .add_special_tokens(tokens, &self.model, self.normalizer.as_deref())
     }
 
     /// Add the given tokens to the added vocabulary
     pub fn add_tokens(&mut self, tokens: &[AddedToken]) -> usize {
         self.added_vocabulary
-            .add_tokens(tokens, self.model.as_ref(), self.normalizer.as_deref())
+            .add_tokens(tokens, &self.model, self.normalizer.as_deref())
     }
 }

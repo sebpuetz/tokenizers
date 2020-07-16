@@ -1,14 +1,56 @@
 extern crate tokenizers as tk;
 
-use super::utils::Container;
+use crate::models::PyModelWrapper;
 use crate::tokenizer::AddedToken;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::*;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[pyclass]
 pub struct Trainer {
-    pub trainer: Container<dyn tk::tokenizer::Trainer>,
+    pub trainer: Box<dyn tk::tokenizer::Trainer<Model = PyModelWrapper>>,
+}
+
+pub enum TrainWrapper {
+    BpeTrainer(tk::models::bpe::BpeTrainer),
+    WordPieceTrainer(tk::models::wordpiece::WordPieceTrainer),
+}
+
+impl tk::Trainer for TrainWrapper {
+    type Model = PyModelWrapper;
+
+    fn should_show_progress(&self) -> bool {
+        match self {
+            TrainWrapper::BpeTrainer(bpe) => bpe.should_show_progress(),
+            TrainWrapper::WordPieceTrainer(wp) => wp.should_show_progress(),
+        }
+    }
+
+    fn train(&self, words: HashMap<String, u32>) -> tk::Result<(Self::Model, Vec<tk::AddedToken>)> {
+        match self {
+            TrainWrapper::BpeTrainer(bpe) => bpe.train(words).map(|(model, added)| {
+                let model = PyModelWrapper {
+                    inner: Arc::new(model.into()),
+                };
+                (model, added)
+            }),
+            TrainWrapper::WordPieceTrainer(wp) => wp.train(words).map(|(model, added)| {
+                let model = PyModelWrapper {
+                    inner: Arc::new(model.into()),
+                };
+                (model, added)
+            }),
+        }
+    }
+
+    fn process_tokens(&self, words: &mut HashMap<String, u32>, tokens: Vec<String>) {
+        match self {
+            TrainWrapper::BpeTrainer(bpe) => bpe.process_tokens(words, tokens),
+            TrainWrapper::WordPieceTrainer(wp) => wp.process_tokens(words, tokens),
+        }
+    }
 }
 
 #[pyclass(extends=Trainer)]
@@ -74,7 +116,7 @@ impl BpeTrainer {
         Ok((
             BpeTrainer {},
             Trainer {
-                trainer: Container::Owned(Box::new(builder.build())),
+                trainer: Box::new(TrainWrapper::BpeTrainer(builder.build())),
             },
         ))
     }
@@ -144,7 +186,7 @@ impl WordPieceTrainer {
         Ok((
             WordPieceTrainer {},
             Trainer {
-                trainer: Container::Owned(Box::new(builder.build())),
+                trainer: Box::new(TrainWrapper::WordPieceTrainer(builder.build())),
             },
         ))
     }

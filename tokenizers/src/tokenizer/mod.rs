@@ -191,9 +191,9 @@ impl<I1: Into<InputSequence>, I2: Into<InputSequence>> From<(I1, I2)> for Encode
 }
 
 /// A `Tokenizer` is capable of encoding/decoding any text.
-pub struct Tokenizer<T> {
+pub struct Tokenizer<T, N> {
     // Tokenizer parts
-    normalizer: Option<Box<dyn Normalizer>>,
+    normalizer: Option<N>,
     pre_tokenizer: Option<Box<dyn PreTokenizer>>,
     model: T,
     post_processor: Option<Box<dyn PostProcessor>>,
@@ -207,9 +207,10 @@ pub struct Tokenizer<T> {
     padding: Option<PaddingParams>,
 }
 
-impl<T> std::str::FromStr for Tokenizer<T>
+impl<T, N> std::str::FromStr for Tokenizer<T, N>
 where
     T: for<'de> Deserialize<'de> + Default + Model,
+    N: for<'de> Deserialize<'de> + Default + Normalizer,
 {
     type Err = Error;
 
@@ -218,9 +219,10 @@ where
     }
 }
 
-impl<T> Tokenizer<T>
+impl<T, N> Tokenizer<T, N>
 where
     T: Default + DeserializeOwned + Model,
+    N: Default + DeserializeOwned + Normalizer,
 {
     /// Instantiate a new Tokenizer from the given file
     pub fn from_file<P: AsRef<Path>>(file: P) -> Result<Self> {
@@ -230,9 +232,10 @@ where
     }
 }
 
-impl<T> Tokenizer<T>
+impl<T, N> Tokenizer<T, N>
 where
     T: Model,
+    N: Normalizer
 {
     /// Instantiate a new Tokenizer, with the given Model
     pub fn new(model: T) -> Self {
@@ -254,6 +257,7 @@ where
     pub fn to_string(&self, pretty: bool) -> Result<String>
     where
         T: Serialize,
+        N: Serialize,
     {
         Ok(if pretty {
             serde_json::to_string_pretty(self)?
@@ -266,6 +270,7 @@ where
     pub fn save(&self, path: &str, pretty: bool) -> Result<()>
     where
         T: Serialize,
+        N: Serialize,
     {
         let serialized = self.to_string(pretty)?;
 
@@ -276,14 +281,14 @@ where
     }
 
     /// Set the normalizer
-    pub fn with_normalizer(&mut self, normalizer: Box<dyn Normalizer>) -> &Self {
+    pub fn with_normalizer(&mut self, normalizer: N) -> &Self {
         self.normalizer = Some(normalizer);
         self
     }
 
     /// Get the normalizer
     #[allow(clippy::borrowed_box)]
-    pub fn get_normalizer(&self) -> Option<&Box<dyn Normalizer>> {
+    pub fn get_normalizer(&self) -> Option<&N> {
         self.normalizer.as_ref()
     }
 
@@ -407,7 +412,7 @@ where
     pub fn normalize(&self, sentence: &str) -> Result<NormalizedString> {
         let mut normalized = self
             .added_vocabulary
-            .extract_and_normalize(self.normalizer.as_deref(), sentence)
+            .extract_and_normalize(self.normalizer.as_ref(), sentence)
             .into_iter()
             .map(|(mut sentence, id)| -> Result<NormalizedString> {
                 if id.is_some() {
@@ -439,7 +444,7 @@ where
         for subseq in sequence {
             let results = self
                 .added_vocabulary
-                .extract_and_normalize(self.normalizer.as_deref(), &subseq)
+                .extract_and_normalize(self.normalizer.as_ref(), &subseq)
                 .into_iter()
                 .map(
                     |(mut normalized, id)| -> Result<(Encoding, NormalizedString)> {
@@ -509,7 +514,8 @@ where
     /// ```
     /// # use tokenizers::Tokenizer;
     /// # use tokenizers::models::bpe::BPE;
-    /// # let tokenizer = Tokenizer::new(BPE::default());
+    /// # use tokenizers::normalizers::NormalizerWrapper;
+    /// # let tokenizer = Tokenizer::<_, NormalizerWrapper>::new(BPE::default());
     /// #
     /// // Sequences:
     /// tokenizer.encode("Single sequence", false);
@@ -774,12 +780,12 @@ where
     /// these special tokens while decoding
     pub fn add_special_tokens(&mut self, tokens: &[AddedToken]) -> usize {
         self.added_vocabulary
-            .add_special_tokens(tokens, &self.model, self.normalizer.as_deref())
+            .add_special_tokens(tokens, &self.model, self.normalizer.as_ref())
     }
 
     /// Add the given tokens to the added vocabulary
     pub fn add_tokens(&mut self, tokens: &[AddedToken]) -> usize {
         self.added_vocabulary
-            .add_tokens(tokens, &self.model, self.normalizer.as_deref())
+            .add_tokens(tokens, &self.model, self.normalizer.as_ref())
     }
 }

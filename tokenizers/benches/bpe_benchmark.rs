@@ -10,10 +10,11 @@ use tokenizers::models::bpe::{BpeTrainerBuilder, BPE};
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::tokenizer::{AddedToken, EncodeInput, Tokenizer, Trainer};
+use tokenizers::normalizers::NormalizerWrapper;
 
 static BATCH_SIZE: usize = 1_000;
 
-fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer<BPE> {
+fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer<BPE, NormalizerWrapper> {
     let mut tokenizer = Tokenizer::new(bpe);
     tokenizer.with_pre_tokenizer(Box::new(ByteLevel::default()));
     tokenizer.with_decoder(Box::new(ByteLevel::default()));
@@ -22,7 +23,7 @@ fn create_gpt2_tokenizer(bpe: BPE) -> Tokenizer<BPE> {
     tokenizer
 }
 
-fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer<BPE>, lines: &[EncodeInput]) -> Duration {
+fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer<BPE, NormalizerWrapper>, lines: &[EncodeInput]) -> Duration {
     let mut duration = Duration::new(0, 0);
     let mut line_index: usize = 0;
     for _i in 0..iters {
@@ -39,7 +40,7 @@ fn iter_bench_encode(iters: u64, tokenizer: &Tokenizer<BPE>, lines: &[EncodeInpu
 
 fn iter_bench_encode_batch(
     iters: u64,
-    tokenizer: &Tokenizer<BPE>,
+    tokenizer: &Tokenizer<BPE, NormalizerWrapper>,
     batches: &[Vec<EncodeInput>],
 ) -> Duration {
     let mut duration = Duration::new(0, 0);
@@ -98,7 +99,7 @@ fn bench_gpt2(c: &mut Criterion) {
 #[allow(clippy::borrowed_box)]
 fn iter_bench_train(
     iters: u64,
-    tokenizer: &mut Tokenizer<BPE>,
+    tokenizer: &mut Tokenizer<BPE, NormalizerWrapper>,
     trainer: &Box<dyn Trainer<Model = BPE>>,
     files: Vec<String>,
 ) -> Duration {

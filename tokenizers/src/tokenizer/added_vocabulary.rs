@@ -56,7 +56,7 @@ impl AddedToken {
         self
     }
     /// Retrive the pattern built for this token, according to all the specified parameters.
-    pub fn get_pattern(&self, normalizer: Option<&dyn Normalizer>) -> String {
+    pub fn get_pattern(&self, normalizer: Option<&impl Normalizer>) -> String {
         let mut r = if self.single_word {
             let first_b = self
                 .content
@@ -215,8 +215,8 @@ impl AddedVocabulary {
     pub fn add_special_tokens(
         &mut self,
         tokens: &[AddedToken],
-        model: &dyn Model,
-        normalizer: Option<&dyn Normalizer>,
+        model: &impl Model,
+        normalizer: Option<&impl Normalizer>,
     ) -> usize {
         for token in tokens {
             if !token.content.is_empty() && !self.special_tokens_set.contains(&token.content) {
@@ -232,8 +232,8 @@ impl AddedVocabulary {
     pub fn add_tokens(
         &mut self,
         tokens: &[AddedToken],
-        model: &dyn Model,
-        normalizer: Option<&dyn Normalizer>,
+        model: &impl Model,
+        normalizer: Option<&impl Normalizer>,
     ) -> usize {
         let mut ignored = 0;
         for token in tokens {
@@ -273,7 +273,7 @@ impl AddedVocabulary {
     ///
     /// We keep two different RegexSet, one that will take care of matching against the
     /// non-normalized string, and one matching against the normalized one.
-    fn refresh_added_tokens(&mut self, model: &dyn Model, normalizer: Option<&dyn Normalizer>) {
+    fn refresh_added_tokens(&mut self, model: &impl Model, normalizer: Option<&impl Normalizer>) {
         type TupleTokenId<'a> = (&'a AddedToken, u32);
         let (normalized, non_normalized): (Vec<TupleTokenId>, Vec<TupleTokenId>) = self
             .special_tokens
@@ -418,7 +418,7 @@ impl AddedVocabulary {
     /// contains the relevant ID if this is an additional token.
     pub fn extract_and_normalize(
         &self,
-        normalizer: Option<&dyn Normalizer>,
+        normalizer: Option<&impl Normalizer>,
         sentence: &str,
     ) -> Vec<(NormalizedString, Option<u32>)> {
         // 1. We extract all the non-normalized tokens from the non-normalized string
@@ -486,6 +486,7 @@ mod tests {
     use crate::normalizers::utils::Lowercase;
     use crate::{Offsets, Result, Token};
     use std::path::{Path, PathBuf};
+    use crate::normalizers::NormalizerWrapper;
 
     #[derive(Serialize, Deserialize)]
     struct ModelMock {
@@ -536,10 +537,11 @@ mod tests {
     fn can_add_tokens() {
         let model = ModelMock::new(&[("test", 0), ("tost", 1)]);
         let mut vocab = AddedVocabulary::new();
+        let normalizer: Option<&NormalizerWrapper> = None;
 
         // Add tokens normally
         assert_eq!(
-            vocab.add_tokens(&[AddedToken::from("added_token_1", false)], &model, None),
+            vocab.add_tokens(&[AddedToken::from("added_token_1", false)], &model, normalizer),
             1
         );
         assert_eq!(vocab.len(), 1);
@@ -552,7 +554,7 @@ mod tests {
                     AddedToken::from("added_token_2", false)
                 ],
                 &model,
-                None
+                normalizer
             ),
             1
         );
@@ -560,7 +562,7 @@ mod tests {
 
         // Does not add tokens already covered by the model
         assert_eq!(
-            vocab.add_tokens(&[AddedToken::from("test", false)], &model, None),
+            vocab.add_tokens(&[AddedToken::from("test", false)], &model, normalizer),
             0
         );
         assert_eq!(vocab.len(), 2);
@@ -570,10 +572,11 @@ mod tests {
     fn can_add_special_tokens() {
         let model = ModelMock::new(&[("test", 0), ("tost", 1)]);
         let mut vocab = AddedVocabulary::new();
+        let normalizer: Option<&NormalizerWrapper> = None;
 
         // Add tokens normally
         assert_eq!(
-            vocab.add_special_tokens(&[AddedToken::from("added_token_1", true)], &model, None),
+            vocab.add_special_tokens(&[AddedToken::from("added_token_1", true)], &model, normalizer),
             1
         );
         assert_eq!(vocab.len(), 1);
@@ -586,7 +589,7 @@ mod tests {
                     AddedToken::from("added_token_2", true)
                 ],
                 &model,
-                None
+                normalizer
             ),
             1
         );
@@ -594,7 +597,7 @@ mod tests {
 
         // Can add tokens already covered by the model
         assert_eq!(
-            vocab.add_special_tokens(&[AddedToken::from("test", true)], &model, None),
+            vocab.add_special_tokens(&[AddedToken::from("test", true)], &model, normalizer),
             0
         );
         assert_eq!(vocab.len(), 2); // Did not add a new token, since it exist in the original model
@@ -607,6 +610,7 @@ mod tests {
         // Is able to extract both normal and special tokens
         let model = ModelMock::new(&[]);
         let mut vocab = AddedVocabulary::new();
+        let normalizer: Option<&NormalizerWrapper> = None;
 
         vocab.add_tokens(
             &[
@@ -614,7 +618,7 @@ mod tests {
                 AddedToken::from("name", false),
             ],
             &model,
-            None,
+            normalizer,
         );
         vocab.add_special_tokens(
             &[
@@ -622,10 +626,10 @@ mod tests {
                 AddedToken::from("[SEP]", true),
             ],
             &model,
-            None,
+            normalizer,
         );
 
-        let result = vocab.extract_and_normalize(None, "[CLS] My name is Anthony [SEP]");
+        let result = vocab.extract_and_normalize(normalizer, "[CLS] My name is Anthony [SEP]");
         assert_eq!(
             result
                 .iter()

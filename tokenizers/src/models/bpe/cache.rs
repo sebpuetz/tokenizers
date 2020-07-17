@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::RwLock;
 
+use lru::LruCache;
+use std::sync::atomic::AtomicUsize;
+use std::borrow::{Borrow, BorrowMut};
+
 /// The default capacity for a `BPE`'s internal cache.
 pub static DEFAULT_CACHE_CAPACITY: usize = 10_000;
 
@@ -17,6 +21,48 @@ where
 {
     map: RwLock<HashMap<K, V>>,
     pub capacity: usize,
+}
+
+pub(super) struct LRUCache<K, V> {
+    cache: RwLock<LruCache<K, V>>,
+    capacity: usize,
+}
+
+impl<K, V> LRUCache<K, V> where K: Eq + Hash {
+    fn new(capacity: usize) -> Self {
+        LRUCache {
+            cache: RwLock::new(LruCache::new(capacity)),
+            capacity,
+        }
+    }
+
+    pub(crate) fn fresh(&self) -> Self {
+        LRUCache::new(self.capacity)
+    }
+
+    /// Clear the cache.
+    pub(super) fn clear(&self) {
+        self.cache.write().unwrap().clear();
+    }
+
+    pub(super) fn get_values<I, Q>(&mut self, keys_iter: I) -> Option<Vec<Option<V>>>
+        where
+            I: IntoIterator<Item = Q>,
+            Q: AsRef<K>,
+            V: Clone,
+    {
+        if let Ok(ref mut cache) = self.cache.try_write() {
+            Some(keys_iter.into_iter().map(|k| cache.borrow_mut().get(k.as_ref()).cloned()).collect())
+        } else {
+            None
+        }
+    }
+}
+
+impl<K, V> Default for LRUCache<K, V> where K: Eq + Hash {
+    fn default() -> Self {
+        LRUCache::new(DEFAULT_CACHE_CAPACITY)
+    }
 }
 
 // We dont really care about Cache comparison, so let's make them always equal
@@ -61,9 +107,11 @@ where
         self.map.write().unwrap().clear();
     }
 
-    pub(super) fn get_values<I>(&self, keys_iter: I) -> Option<Vec<Option<V>>>
+    pub(super) fn get_values<'a, I, Q: 'a>(&self, keys_iter: I) -> Option<Vec<Option<V>>>
     where
-        I: Iterator<Item = K>,
+        I: Iterator<Item = &'a Q>,
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
     {
         if let Ok(ref mut cache) = self.map.try_read() {
             Some(keys_iter.map(|k| cache.get(&k).cloned()).collect())

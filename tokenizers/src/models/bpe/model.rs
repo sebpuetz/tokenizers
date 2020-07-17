@@ -378,7 +378,7 @@ impl Model for BPE {
             None => self
                 .cache
                 .as_ref()
-                .and_then(|cache| cache.get_values(sentence.iter().map(|(s, _)| s.clone()))),
+                .and_then(|cache| cache.get_values(sentence.iter().map(|(s, _)| s))),
             Some(_) => None, // If using dropout we don't want to use the cache.
         };
         let mut should_update_cache = false;

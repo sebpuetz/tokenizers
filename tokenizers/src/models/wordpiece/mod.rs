@@ -14,6 +14,7 @@ use std::{
 
 mod serialization;
 mod trainer;
+use std::borrow::Cow;
 pub use trainer::*;
 
 #[derive(Debug)]
@@ -225,55 +226,16 @@ impl Model for WordPiece {
                 });
                 continue;
             }
-
-            let mut is_bad = false;
-            let mut start = 0;
-            let mut sub_tokens: Vec<Token> = vec![];
-            let chars = token.chars().collect::<Vec<_>>();
-
-            while start < chars.len() {
-                let mut end = chars.len();
-                let mut cur_str = None;
-
-                while start < end {
-                    let mut substr = chars[start..end].iter().collect::<String>();
-                    if start > 0 {
-                        substr = format!("{}{}", self.continuing_subword_prefix, substr);
-                    }
-                    if self.vocab.contains_key(&substr) {
-                        cur_str = Some(Token {
-                            id: self.vocab[&substr],
-                            value: substr,
-                            offsets: (initial_offsets.0 + start, initial_offsets.0 + end),
-                            word: index as u32,
-                        });
-                        break;
-                    }
-                    end -= 1;
-                }
-
-                if cur_str.is_none() {
-                    is_bad = true;
-                    break;
-                }
-
-                sub_tokens.push(cur_str.unwrap());
-                start = end;
-            }
-
-            if is_bad {
-                output_tokens.push(Token {
-                    value: self.unk_token.clone(),
-                    id: *self
-                        .vocab
-                        .get(&self.unk_token)
-                        .ok_or(Error::MissingUnkToken)?,
-                    offsets: initial_offsets,
-                    word: index as u32,
-                });
-            } else {
-                output_tokens.extend(sub_tokens);
-            }
+            output_tokens.extend(
+                PieceIter::new(&token, self)?.map(|(id, val, (start, end))| {
+                    Token::new(
+                        id,
+                        val.into(),
+                        (start + initial_offsets.0, end + initial_offsets.0),
+                        index as u32,
+                    )
+                }),
+            );
         }
 
         Ok(output_tokens)
@@ -308,6 +270,83 @@ impl Model for WordPiece {
         )?;
 
         Ok(vec![vocab_path])
+    }
+}
+
+/// Iterator over WordPieces
+struct PieceIter<'a, 'b> {
+    tokenizer: &'a WordPiece,
+    sequence: &'b str,
+    n_bytes: usize,
+    unk_id: u32,
+}
+
+impl<'a, 'b> PieceIter<'a, 'b> {
+    /// Creates an Iterator over the WordPieces in `sequence`.
+    fn new(sequence: &'b str, tokenizer: &'a WordPiece) -> Result<Self> {
+        Ok(PieceIter {
+            tokenizer,
+            n_bytes: sequence.len(),
+            sequence,
+            unk_id: *tokenizer
+                .vocab
+                .get(&tokenizer.unk_token)
+                .ok_or(Error::MissingUnkToken)?,
+        })
+    }
+}
+
+impl<'a, 'b> Iterator for PieceIter<'a, 'b> {
+    type Item = (u32, Cow<'b, str>, (usize, usize));
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.sequence.is_empty() {
+            return None;
+        }
+        let pos = self.n_bytes - self.sequence.len();
+        let cont = pos > 0;
+        // only allocate a string when we need to prepend the cont-prefix
+        let sequence = if cont {
+            Cow::Owned(format!(
+                "{}{}",
+                self.tokenizer.continuing_subword_prefix, self.sequence
+            ))
+        } else {
+            Cow::Borrowed(self.sequence)
+        };
+        let prefix_len = self.tokenizer.continuing_subword_prefix.len();
+        for end in sequence
+            .char_indices()
+            .map(|(end, _)| end)
+            .chain(Some(self.sequence.len())) // include sequence length as end
+            .rev()
+        // start iterating from back to match on longest sequence
+        {
+            // break if only the prefix is left to prevent generating invalid tokens
+            if cont && end <= prefix_len {
+                break;
+            }
+            if let Some(&id) = self.tokenizer.vocab.get(&sequence[..end]) {
+                let ret = if cont {
+                    let ret = Cow::Owned(sequence[..end].to_owned());
+                    self.sequence = &self.sequence[end - prefix_len..];
+                    ret
+                } else {
+                    let ret = Cow::Borrowed(&self.sequence[..end]);
+                    self.sequence = &self.sequence[end..];
+                    ret
+                };
+                return Some((id, ret, (pos, pos + end)));
+            }
+        }
+        let unk_char_len = self.sequence.chars().next().unwrap().len_utf8();
+        self.sequence = &self.sequence[unk_char_len..];
+        let offset = (pos, pos + unk_char_len);
+        Some((
+            self.unk_id,
+            Cow::Owned(self.tokenizer.unk_token.clone()),
+            offset,
+        ))
     }
 }
 

@@ -15,6 +15,7 @@ use std::{
 mod serialization;
 mod trainer;
 pub use trainer::*;
+use std::borrow::Cow;
 
 #[derive(Debug)]
 pub enum Error {
@@ -209,7 +210,7 @@ impl Model for WordPiece {
     }
 
     fn tokenize(&self, sentence: Vec<(String, Offsets)>) -> Result<Vec<Token>> {
-        let mut output_tokens = vec![];
+        let mut output_tokens = Vec::with_capacity(sentence.len());
 
         for (index, (token, initial_offsets)) in sentence.into_iter().enumerate() {
             let char_len = token.chars().count();
@@ -226,42 +227,27 @@ impl Model for WordPiece {
                 continue;
             }
 
-            let mut is_bad = false;
             let mut start = 0;
-            let mut sub_tokens: Vec<Token> = vec![];
-            let chars = token.chars().collect::<Vec<_>>();
+            let chars = token.char_indices().map(|(i, c)| i).chain(Some(token.len())).collect::<Vec<_>>();
 
-            while start < chars.len() {
-                let mut end = chars.len();
-                let mut cur_str = None;
-
-                while start < end {
-                    let mut substr = chars[start..end].iter().collect::<String>();
-                    if start > 0 {
-                        substr = format!("{}{}", self.continuing_subword_prefix, substr);
-                    }
-                    if self.vocab.contains_key(&substr) {
-                        cur_str = Some(Token {
-                            id: self.vocab[&substr],
-                            value: substr,
+            'a: while start < token.len() {
+                let substr = if start == 0 {
+                    Cow::Borrowed(&token[start..])
+                } else {
+                    format!("{}{}", self.continuing_subword_prefix, &token[start..]).into()
+                };
+                for end in chars.iter().rev().copied() {
+                    if let Some(idx) = self.vocab.get(&substr[..end-start]) {
+                        output_tokens.push(Token {
+                            id: *idx,
+                            value: substr.into(),
                             offsets: (initial_offsets.0 + start, initial_offsets.0 + end),
                             word: index as u32,
                         });
-                        break;
+                        start = end;
+                        continue 'a;
                     }
-                    end -= 1;
                 }
-
-                if cur_str.is_none() {
-                    is_bad = true;
-                    break;
-                }
-
-                sub_tokens.push(cur_str.unwrap());
-                start = end;
-            }
-
-            if is_bad {
                 output_tokens.push(Token {
                     value: self.unk_token.clone(),
                     id: *self
@@ -271,8 +257,7 @@ impl Model for WordPiece {
                     offsets: initial_offsets,
                     word: index as u32,
                 });
-            } else {
-                output_tokens.extend(sub_tokens);
+                start += 1
             }
         }
 
@@ -308,6 +293,81 @@ impl Model for WordPiece {
         )?;
 
         Ok(vec![vocab_path])
+    }
+}
+
+struct PieceIter<'a, 'b> {
+    tokenizer: &'a WordPiece,
+    sequence: &'b str,
+    pos: usize,
+    n_chars: usize,
+    unk_id: u32,
+}
+
+impl<'a, 'b> PieceIter<'a, 'b> {
+    fn new(sequence: &'b str, tokenizer: &'a WordPiece) -> Result<Self> {
+        Ok(PieceIter {
+            tokenizer,
+            n_chars: sequence.chars().count(),
+            sequence,
+            pos: 0,
+            unk_id: *tokenizer.
+                vocab
+                .get(&tokenizer.unk_token)
+                .ok_or(Error::MissingUnkToken)?
+        })
+    }
+}
+
+impl<'a, 'b> Iterator for PieceIter<'a, 'b> {
+    type Item = (u32, String, (usize, usize));
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.sequence.is_empty() {
+            return None;
+        }
+        let owned;
+        let sequence = if self.pos > 0 {
+            owned = true;
+            Cow::Owned(format!("##{}", self.sequence))
+        } else {
+            owned = false;
+            Cow::Borrowed(self.sequence)
+        };
+        for (i, end) in sequence
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain(Some(self.sequence.len()))
+            .rev()
+            .take_while(|end| (*end > 2 && owned) || (!owned && *end > 0))
+            .enumerate()
+        {
+            if let Some(&id) = self.tokenizer.vocab.get(&sequence[..end]) {
+                let ret_seq = sequence[..end].to_string();
+                if owned {
+                    self.sequence = &self.sequence[end - 2..];
+                } else {
+                    self.sequence = &self.sequence[end..];
+                }
+
+                let old_pos = self.pos;
+                self.pos += self.n_chars - i;
+                self.n_chars = i;
+                return Some((id, ret_seq, (old_pos, self.pos)));
+            }
+        }
+        let next_start = self
+            .sequence
+            .char_indices()
+            .skip(1)
+            .map(|(i, _)| i)
+            .next()
+            .unwrap_or(self.sequence.len());
+        self.sequence = &self.sequence[next_start..];
+        let offset = (self.pos, self.pos + 1);
+        self.pos += 1;
+        self.n_chars -= 1;
+        Some((self.unk_id, self.tokenizer.unk_token.clone(), offset))
     }
 }
 

@@ -283,12 +283,15 @@ impl NormalizedString {
 
     /// Applies filtering over our characters
     pub fn filter<F: Fn(char) -> bool>(&mut self, keep: F) -> &mut Self {
+        if self.normalized.chars().all(|c| keep(c)) {
+            return self;
+        }
         let mut removed = 0;
         let filtered = self
             .normalized
             .chars()
             .rev()
-            .map(|c| {
+            .filter_map(|c| {
                 if keep(c) {
                     if removed > 0 {
                         let res = (c, -(removed as isize));
@@ -303,7 +306,7 @@ impl NormalizedString {
                 }
             })
             .collect::<Vec<_>>();
-        self.transform(filtered.into_iter().rev().filter_map(|o| o), removed);
+        self.transform(filtered.into_iter().rev(), removed);
         self
     }
 
@@ -337,24 +340,40 @@ impl NormalizedString {
 
     /// Lowercase
     pub fn lowercase(&mut self) -> &mut Self {
-        let mut new_chars: Vec<(char, isize)> = vec![];
-        self.for_each(|c| {
-            c.to_lowercase().enumerate().for_each(|(index, c)| {
-                new_chars.push((c, if index > 0 { 1 } else { 0 }));
-            })
-        });
+        if self
+            .normalized
+            .chars()
+            .all(|c| c.is_lowercase() || c.to_lowercase().size_hint().0 == 1)
+        {
+            self.normalized = self.normalized.to_lowercase();
+            return self;
+        }
+        let mut new_chars: Vec<(char, isize)> = Vec::with_capacity(self.len());
+        new_chars.extend(self.normalized.chars().flat_map(|c| {
+            c.to_lowercase()
+                .enumerate()
+                .map(|(index, c)| (c, if index > 0 { 1 } else { 0 }))
+        }));
         self.transform(new_chars.into_iter(), 0);
         self
     }
 
     /// Uppercase
     pub fn uppercase(&mut self) -> &mut Self {
+        if self
+            .normalized
+            .chars()
+            .all(|c| c.is_uppercase() || c.to_uppercase().size_hint().0 == 1)
+        {
+            self.normalized = self.normalized.to_uppercase();
+            return self;
+        }
         let mut new_chars: Vec<(char, isize)> = vec![];
-        self.for_each(|c| {
-            c.to_uppercase().enumerate().for_each(|(index, c)| {
-                new_chars.push((c, if index > 0 { 1 } else { 0 }));
-            })
-        });
+        new_chars.extend(self.normalized.chars().flat_map(|c| {
+            c.to_uppercase()
+                .enumerate()
+                .map(|(index, c)| (c, if index > 0 { 1 } else { 0 }))
+        }));
         self.transform(new_chars.into_iter(), 0);
         self
     }

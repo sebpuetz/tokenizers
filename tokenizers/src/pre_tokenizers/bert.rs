@@ -1,5 +1,6 @@
 use crate::tokenizer::{NormalizedString, Offsets, PreTokenizer, Result};
 use serde::{Deserialize, Serialize};
+use std::mem;
 use unicode_categories::UnicodeCategories;
 
 fn is_bert_punc(x: char) -> bool {
@@ -7,32 +8,30 @@ fn is_bert_punc(x: char) -> bool {
 }
 
 /// Split the given string as the `should_split` predicate dictates. Keep track of the offsets
-fn split_on<F: Fn(char) -> bool>(
-    s: &str,
-    should_split: F,
-    include_split_token: bool,
-) -> Vec<(String, Offsets)> {
+fn split_on<F: Fn(char) -> (bool, bool)>(s: &str, should_split: F) -> Vec<(String, Offsets)> {
     let mut words: Vec<(String, Offsets)> = vec![];
     let mut offset = 0;
-    let mut word = Vec::with_capacity(50);
+    let mut word = String::with_capacity(20);
+
     s.chars().for_each(|c| {
-        if should_split(c) {
+        let (is_delim, include) = should_split(c);
+        if is_delim {
             if !word.is_empty() {
                 let offsets = (offset - word.len(), offset);
-                words.push((word.drain(0..).collect::<String>(), offsets));
+                words.push((mem::replace(&mut word, String::with_capacity(20)), offsets));
             }
-            if include_split_token {
-                words.push((c.to_string(), (offset, offset + 1)));
+            if include {
+                words.push((c.to_string(), (offset, offset + c.len_utf8())));
             }
-        } else if !should_split(c) {
+        } else {
             word.push(c);
         }
-        offset += 1;
+        offset += c.len_utf8();
     });
     // Don't forget the potential last word
     if !word.is_empty() {
         let offsets = (offset - word.len(), offset);
-        words.push((word.drain(0..).collect::<String>(), offsets));
+        words.push((word, offsets));
     }
 
     words
@@ -44,15 +43,15 @@ pub struct BertPreTokenizer;
 #[typetag::serde]
 impl PreTokenizer for BertPreTokenizer {
     fn pre_tokenize(&self, normalized: &mut NormalizedString) -> Result<Vec<(String, Offsets)>> {
-        let mut split_tokens = vec![];
-        for (token, offsets) in split_on(normalized.get(), char::is_whitespace, false) {
-            split_tokens.extend(
-                split_on(&token, is_bert_punc, true)
-                    .into_iter()
-                    .map(|(tok, off)| (tok, (off.0 + offsets.0, off.1 + offsets.0))),
-            );
-        }
-        Ok(split_tokens)
+        Ok(split_on(normalized.get(), |c| {
+            if char::is_whitespace(c) {
+                (true, false)
+            } else if is_bert_punc(c) {
+                (true, true)
+            } else {
+                (false, false)
+            }
+        }))
     }
 }
 

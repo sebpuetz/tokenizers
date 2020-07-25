@@ -1,50 +1,92 @@
-extern crate tokenizers as tk;
+use std::sync::Arc;
 
-use super::error::{PyError, ToPyResult};
-use super::utils::Container;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::*;
+use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tk::tokenizer::{Offsets, Result};
 
-#[pyclass(dict, module = "tokenizers.pre_tokenizers")]
-pub struct PreTokenizer {
-    pub pretok: Container<dyn tk::tokenizer::PreTokenizer>,
+use tk::pre_tokenizers::bert::BertPreTokenizer;
+use tk::pre_tokenizers::byte_level::ByteLevel;
+use tk::pre_tokenizers::delimiter::CharDelimiterSplit;
+use tk::pre_tokenizers::metaspace::Metaspace;
+use tk::pre_tokenizers::whitespace::{Whitespace, WhitespaceSplit};
+use tk::tokenizer::Offsets;
+use tk::{NormalizedString, PreTokenizer};
+use tokenizers as tk;
+
+use super::error::{PyError, ToPyResult};
+
+#[pyclass(dict, module = "tokenizers.pre_tokenizers", name=PreTokenizer)]
+#[derive(Clone)]
+pub struct PyPreTokenizer {
+    pub pretok: Arc<dyn PreTokenizer>,
 }
+
+impl PyPreTokenizer {
+    pub fn new(pretok: Arc<dyn PreTokenizer>) -> Self {
+        PyPreTokenizer { pretok }
+    }
+}
+
+impl Serialize for PyPreTokenizer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.pretok.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PyPreTokenizer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Arc::deserialize(deserializer).map(PyPreTokenizer::new)
+    }
+}
+
+#[typetag::serde]
+impl PreTokenizer for PyPreTokenizer {
+    fn pre_tokenize(
+        &self,
+        normalized: &mut NormalizedString,
+    ) -> tk::Result<Vec<(String, (usize, usize))>> {
+        self.pretok.pre_tokenize(normalized)
+    }
+}
+
 #[pymethods]
-impl PreTokenizer {
+impl PyPreTokenizer {
     #[staticmethod]
     fn custom(pretok: PyObject) -> PyResult<Self> {
-        let py_pretok = PyPreTokenizer::new(pretok)?;
-        Ok(PreTokenizer {
-            pretok: Container::Owned(Box::new(py_pretok)),
+        let py_pretok = CustomPreTokenizer::new(pretok)?;
+        Ok(PyPreTokenizer {
+            pretok: Arc::new(py_pretok),
         })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        let data = self
-            .pretok
-            .execute(|pretok| serde_json::to_string(&pretok))
-            .map_err(|e| {
-                exceptions::Exception::py_err(format!(
-                    "Error while attempting to pickle PreTokenizer: {}",
-                    e.to_string()
-                ))
-            })?;
+        let data = serde_json::to_string(&self.pretok.as_ref()).map_err(|e| {
+            exceptions::Exception::py_err(format!(
+                "Error while attempting to pickle PreTokenizer: {}",
+                e.to_string()
+            ))
+        })?;
         Ok(PyBytes::new(py, data.as_bytes()).to_object(py))
     }
 
     fn __setstate__(&mut self, py: Python, state: PyObject) -> PyResult<()> {
         match state.extract::<&PyBytes>(py) {
             Ok(s) => {
-                self.pretok =
-                    Container::Owned(serde_json::from_slice(s.as_bytes()).map_err(|e| {
-                        exceptions::Exception::py_err(format!(
-                            "Error while attempting to unpickle PreTokenizer: {}",
-                            e.to_string()
-                        ))
-                    })?);
+                let unpickled = serde_json::from_slice(s.as_bytes()).map_err(|e| {
+                    exceptions::Exception::py_err(format!(
+                        "Error while attempting to unpickle PreTokenizer: {}",
+                        e.to_string()
+                    ))
+                })?;
+                self.pretok = unpickled;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -53,23 +95,19 @@ impl PreTokenizer {
 
     fn pre_tokenize(&self, s: &str) -> PyResult<Vec<(String, Offsets)>> {
         // TODO: Expose the NormalizedString
-        let mut normalized = tk::tokenizer::NormalizedString::from(s);
-        ToPyResult(
-            self.pretok
-                .execute(|pretok| pretok.pre_tokenize(&mut normalized)),
-        )
-        .into()
+        let mut normalized = NormalizedString::from(s);
+        ToPyResult(self.pretok.pre_tokenize(&mut normalized)).into()
     }
 }
 
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct ByteLevel {}
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=ByteLevel)]
+pub struct PyByteLevel {}
 #[pymethods]
-impl ByteLevel {
+impl PyByteLevel {
     #[new]
     #[args(kwargs = "**")]
-    fn new(kwargs: Option<&PyDict>) -> PyResult<(Self, PreTokenizer)> {
-        let mut byte_level = tk::pre_tokenizers::byte_level::ByteLevel::default();
+    fn new(kwargs: Option<&PyDict>) -> PyResult<(Self, PyPreTokenizer)> {
+        let mut byte_level = ByteLevel::default();
         if let Some(kwargs) = kwargs {
             for (key, value) in kwargs {
                 let key: &str = key.extract()?;
@@ -82,59 +120,47 @@ impl ByteLevel {
             }
         }
 
-        Ok((
-            ByteLevel {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(byte_level)),
-            },
-        ))
+        Ok((PyByteLevel {}, PyPreTokenizer::new(Arc::new(byte_level))))
     }
 
     #[staticmethod]
     fn alphabet() -> Vec<String> {
-        tk::pre_tokenizers::byte_level::ByteLevel::alphabet()
+        ByteLevel::alphabet()
             .into_iter()
             .map(|c| c.to_string())
             .collect()
     }
 }
 
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct Whitespace {}
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=Whitespace)]
+pub struct PyWhitespace {}
 #[pymethods]
-impl Whitespace {
+impl PyWhitespace {
     #[new]
-    fn new() -> PyResult<(Self, PreTokenizer)> {
+    fn new() -> PyResult<(Self, PyPreTokenizer)> {
+        Ok((PyWhitespace {}, PyPreTokenizer::new(Arc::new(Whitespace))))
+    }
+}
+
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=WhitespaceSplit)]
+pub struct PyWhitespaceSplit {}
+#[pymethods]
+impl PyWhitespaceSplit {
+    #[new]
+    fn new() -> PyResult<(Self, PyPreTokenizer)> {
         Ok((
-            Whitespace {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(tk::pre_tokenizers::whitespace::Whitespace)),
-            },
+            PyWhitespaceSplit {},
+            PyPreTokenizer::new(Arc::new(WhitespaceSplit)),
         ))
     }
 }
 
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct WhitespaceSplit {}
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=CharDelimiterSplit)]
+pub struct PyCharDelimiterSplit {}
 #[pymethods]
-impl WhitespaceSplit {
+impl PyCharDelimiterSplit {
     #[new]
-    fn new() -> PyResult<(Self, PreTokenizer)> {
-        Ok((
-            WhitespaceSplit {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(tk::pre_tokenizers::whitespace::WhitespaceSplit)),
-            },
-        ))
-    }
-}
-
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct CharDelimiterSplit {}
-#[pymethods]
-impl CharDelimiterSplit {
-    #[new]
-    pub fn new(delimiter: &str) -> PyResult<(Self, PreTokenizer)> {
+    pub fn new(delimiter: &str) -> PyResult<(Self, PyPreTokenizer)> {
         let chr_delimiter = delimiter
             .chars()
             .nth(0)
@@ -142,12 +168,8 @@ impl CharDelimiterSplit {
                 "delimiter must be a single character",
             ))?;
         Ok((
-            CharDelimiterSplit {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(
-                    tk::pre_tokenizers::delimiter::CharDelimiterSplit::new(chr_delimiter),
-                )),
-            },
+            PyCharDelimiterSplit {},
+            PyPreTokenizer::new(Arc::new(CharDelimiterSplit::new(chr_delimiter))),
         ))
     }
 
@@ -156,28 +178,26 @@ impl CharDelimiterSplit {
     }
 }
 
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct BertPreTokenizer {}
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=BertPreTokenizer)]
+pub struct PyBertPreTokenizer {}
 #[pymethods]
-impl BertPreTokenizer {
+impl PyBertPreTokenizer {
     #[new]
-    fn new() -> PyResult<(Self, PreTokenizer)> {
+    fn new() -> PyResult<(Self, PyPreTokenizer)> {
         Ok((
-            BertPreTokenizer {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(tk::pre_tokenizers::bert::BertPreTokenizer)),
-            },
+            PyBertPreTokenizer {},
+            PyPreTokenizer::new(Arc::new(BertPreTokenizer)),
         ))
     }
 }
 
-#[pyclass(extends=PreTokenizer, module = "tokenizers.pre_tokenizers")]
-pub struct Metaspace {}
+#[pyclass(extends=PyPreTokenizer, module = "tokenizers.pre_tokenizers", name=Metaspace)]
+pub struct PyMetaspace {}
 #[pymethods]
-impl Metaspace {
+impl PyMetaspace {
     #[new]
     #[args(kwargs = "**")]
-    fn new(kwargs: Option<&PyDict>) -> PyResult<(Self, PreTokenizer)> {
+    fn new(kwargs: Option<&PyDict>) -> PyResult<(Self, PyPreTokenizer)> {
         let mut replacement = '▁';
         let mut add_prefix_space = true;
 
@@ -198,33 +218,25 @@ impl Metaspace {
         }
 
         Ok((
-            Metaspace {},
-            PreTokenizer {
-                pretok: Container::Owned(Box::new(tk::pre_tokenizers::metaspace::Metaspace::new(
-                    replacement,
-                    add_prefix_space,
-                ))),
-            },
+            PyMetaspace {},
+            PyPreTokenizer::new(Arc::new(Metaspace::new(replacement, add_prefix_space))),
         ))
     }
 }
 
-struct PyPreTokenizer {
+struct CustomPreTokenizer {
     class: PyObject,
 }
 
-impl PyPreTokenizer {
+impl CustomPreTokenizer {
     pub fn new(class: PyObject) -> PyResult<Self> {
-        Ok(PyPreTokenizer { class })
+        Ok(CustomPreTokenizer { class })
     }
 }
 
 #[typetag::serde]
-impl tk::tokenizer::PreTokenizer for PyPreTokenizer {
-    fn pre_tokenize(
-        &self,
-        sentence: &mut tk::tokenizer::NormalizedString,
-    ) -> Result<Vec<(String, Offsets)>> {
+impl tk::tokenizer::PreTokenizer for CustomPreTokenizer {
+    fn pre_tokenize(&self, sentence: &mut NormalizedString) -> tk::Result<Vec<(String, Offsets)>> {
         let gil = Python::acquire_gil();
         let py = gil.python();
 
@@ -251,8 +263,8 @@ impl tk::tokenizer::PreTokenizer for PyPreTokenizer {
     }
 }
 
-impl Serialize for PyPreTokenizer {
-    fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
+impl Serialize for CustomPreTokenizer {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -262,11 +274,11 @@ impl Serialize for PyPreTokenizer {
     }
 }
 
-impl<'de> Deserialize<'de> for PyPreTokenizer {
-    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+impl<'de> Deserialize<'de> for CustomPreTokenizer {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        unimplemented!("PyPreTokenizer cannot be deserialized")
+        Err(D::Error::custom("PyDecoder cannot be deserialized"))
     }
 }

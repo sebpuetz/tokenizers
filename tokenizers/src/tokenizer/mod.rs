@@ -319,6 +319,7 @@ where
 }
 
 /// A `Tokenizer` is capable of encoding/decoding any text.
+#[derive(Clone)]
 pub struct Tokenizer<M, N, PT, PP, D> {
     // Tokenizer parts
     normalizer: Option<N>,

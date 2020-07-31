@@ -5,7 +5,6 @@
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use std::io::{self, BufRead, Write};
 use tokenizers::models::bpe::BPE;
-use tokenizers::normalizers::NormalizerWrapper;
 use tokenizers::pre_tokenizers::byte_level::ByteLevel;
 use tokenizers::processors::PostProcessorWrapper;
 use tokenizers::tokenizer::{AddedToken, Result, Tokenizer};
@@ -20,7 +19,7 @@ fn shell(matches: &ArgMatches) -> Result<()> {
 
     let bpe = BPE::from_files(vocab, merges).build()?;
     let mut tokenizer =
-        Tokenizer::<_, NormalizerWrapper, ByteLevel, PostProcessorWrapper, ByteLevel>::new(bpe);
+        Tokenizer::<_, ByteLevel, PostProcessorWrapper, ByteLevel>::new(bpe);
     tokenizer.with_pre_tokenizer(ByteLevel::default());
     tokenizer.with_decoder(ByteLevel::default());
 

@@ -56,7 +56,7 @@ impl AddedToken {
         self
     }
     /// Retrive the pattern built for this token, according to all the specified parameters.
-    pub fn get_pattern<N: Normalizer>(&self, normalizer: Option<&N>) -> String {
+    pub fn get_pattern<N: Normalizer + ?Sized>(&self, normalizer: Option<&N>) -> String {
         let mut r = if self.single_word {
             let first_b = self
                 .content
@@ -213,7 +213,7 @@ impl AddedVocabulary {
     }
 
     /// Add some special tokens to the vocabulary
-    pub fn add_special_tokens<N: Normalizer>(
+    pub fn add_special_tokens<N: Normalizer + ?Sized>(
         &mut self,
         tokens: &[AddedToken],
         model: &impl Model,
@@ -230,7 +230,7 @@ impl AddedVocabulary {
     }
 
     /// Add some tokens to the vocabulary
-    pub fn add_tokens<N: Normalizer>(
+    pub fn add_tokens<N: Normalizer + ?Sized>(
         &mut self,
         tokens: &[AddedToken],
         model: &impl Model,
@@ -274,7 +274,7 @@ impl AddedVocabulary {
     ///
     /// We keep two different RegexSet, one that will take care of matching against the
     /// non-normalized string, and one matching against the normalized one.
-    fn refresh_added_tokens<N: Normalizer>(&mut self, model: &impl Model, normalizer: Option<&N>) {
+    fn refresh_added_tokens<N: Normalizer + ?Sized>(&mut self, model: &impl Model, normalizer: Option<&N>) {
         type TupleTokenId<'a> = (&'a AddedToken, u32);
         let (normalized, non_normalized): (Vec<TupleTokenId>, Vec<TupleTokenId>) = self
             .special_tokens
@@ -417,7 +417,7 @@ impl AddedVocabulary {
     ///
     /// This method returns a `Vec` of `(NormalizedString, Option<u32>)`, where the optional `u32`
     /// contains the relevant ID if this is an additional token.
-    pub fn extract_and_normalize<N: Normalizer>(
+    pub fn extract_and_normalize<N: Normalizer + ?Sized>(
         &self,
         normalizer: Option<&N>,
         sentence: &str,

@@ -18,7 +18,6 @@ use super::error::{PyError, ToPyResult};
 use super::models::PyModel;
 use super::normalizers::PyNormalizer;
 use super::pre_tokenizers::PyPreTokenizer;
-use super::trainers::PyTrainer;
 use crate::processors::PyPostProcessor;
 
 #[pyclass(dict, module = "tokenizers", name=AddedToken)]
@@ -267,10 +266,9 @@ impl From<PreTokenizedEncodeInput> for tk::tokenizer::EncodeInput {
     }
 }
 
-type TokenizerImpl = Tokenizer<PyModel, PyNormalizer, PyPreTokenizer, PyPostProcessor, PyDecoder>;
+type TokenizerImpl = Tokenizer<PyModel, PyPreTokenizer, PyPostProcessor, PyDecoder>;
 
 #[pyclass(dict, module = "tokenizers", name=Tokenizer)]
-#[derive(Clone)]
 pub struct PyTokenizer {
     tokenizer: TokenizerImpl,
 }
@@ -660,14 +658,14 @@ impl PyTokenizer {
         Ok(self.tokenizer.add_special_tokens(&tokens))
     }
 
-    fn train(&mut self, trainer: &PyTrainer, files: Vec<String>) -> PyResult<()> {
-        self.tokenizer = self
-            .tokenizer
-            .clone()
-            .train(trainer, files)
-            .map_err(|e| exceptions::Exception::py_err(format!("{}", e)))?;
-        Ok(())
-    }
+    // fn train(&mut self, trainer: &PyTrainer, files: Vec<String>) -> PyResult<()> {
+    //     self.tokenizer = self
+    //         .tokenizer
+    //         .clone()
+    //         .train(trainer, files)
+    //         .map_err(|e| exceptions::Exception::py_err(format!("{}", e)))?;
+    //     Ok(())
+    // }
 
     #[args(pair = "None", add_special_tokens = true)]
     fn post_process(
@@ -699,8 +697,15 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_normalizer(&self) -> Option<PyNormalizer> {
-        self.tokenizer.get_normalizer().cloned()
+    fn get_normalizer(&self) -> PyResult<Option<PyNormalizer>> {
+        if let Some(_) = self.tokenizer.get_normalizer() {
+            let py_norm = self.tokenizer.normalizer_as::<PyNormalizer>()
+                .cloned()
+                .ok_or_else(|| exceptions::RuntimeError::py_err("Unexpected normalizer, not a PyNormalizer."))?;
+            Ok(Some(py_norm))
+        } else {
+            Ok(None)
+        }
     }
 
     #[setter]

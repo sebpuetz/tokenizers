@@ -51,7 +51,8 @@
 //!     Ok(())
 //! }
 //! ```
-
+#[macro_use]
+extern crate downcast_rs;
 #[macro_use]
 extern crate lazy_static;
 

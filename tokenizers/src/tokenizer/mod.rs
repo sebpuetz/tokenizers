@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use downcast_rs::Downcast;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::de::DeserializeOwned;
 use serde::export::Formatter;
@@ -44,7 +45,7 @@ pub type Offsets = (usize, usize);
 
 #[typetag::serde(tag = "type")]
 /// Takes care of pre-processing strings.
-pub trait Normalizer: Send + Sync {
+pub trait Normalizer: Send + Sync + Downcast {
     fn normalize(&self, normalized: &mut NormalizedString) -> Result<()>;
 }
 
@@ -207,9 +208,9 @@ impl fmt::Display for BuilderError {
 /// Builder for Tokenizer structs.
 ///
 /// `build()` fails if the `model` is missing.
-pub struct TokenizerBuilder<M, N, PT, PP, D> {
+pub struct TokenizerBuilder<M, PT, PP, D> {
     model: Option<M>,
-    normalizer: Option<N>,
+    normalizer: Option<Box<dyn Normalizer>>,
     pre_tokenizer: Option<PT>,
     post_processor: Option<PP>,
     decoder: Option<D>,
@@ -220,10 +221,9 @@ pub struct TokenizerBuilder<M, N, PT, PP, D> {
     padding: Option<PaddingParams>,
 }
 
-impl<M, N, PT, PP, D> Default for TokenizerBuilder<M, N, PT, PP, D>
+impl<M, PT, PP, D> Default for TokenizerBuilder<M, PT, PP, D>
 where
     M: Model,
-    N: Normalizer,
     PT: PreTokenizer,
     PP: PostProcessor,
     D: Decoder,
@@ -233,10 +233,9 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> TokenizerBuilder<M, N, PT, PP, D>
+impl<M, PT, PP, D> TokenizerBuilder<M, PT, PP, D>
 where
     M: Model,
-    N: Normalizer,
     PT: PreTokenizer,
     PP: PostProcessor,
     D: Decoder,
@@ -258,7 +257,7 @@ where
     /// Convert the TokenizerBuilder to a Tokenizer.
     ///
     /// Conversion fails if the `model` is missing.
-    pub fn build(self) -> Result<Tokenizer<M, N, PT, PP, D>> {
+    pub fn build(self) -> Result<Tokenizer<M, PT, PP, D>> {
         let model = self
             .model
             .ok_or_else(|| Box::new(BuilderError("Model missing.".into())))?;
@@ -282,7 +281,7 @@ where
     }
 
     /// Set the normalizer.
-    pub fn with_normalizer(mut self, normalizer: Option<N>) -> Self {
+    pub fn with_normalizer(mut self, normalizer: Option<Box<dyn Normalizer>>) -> Self {
         self.normalizer = normalizer;
         self
     }
@@ -319,10 +318,9 @@ where
 }
 
 /// A `Tokenizer` is capable of encoding/decoding any text.
-#[derive(Clone)]
-pub struct Tokenizer<M, N, PT, PP, D> {
+pub struct Tokenizer<M, PT, PP, D> {
     // Tokenizer parts
-    normalizer: Option<N>,
+    normalizer: Option<Box<dyn Normalizer>>,
     pre_tokenizer: Option<PT>,
     model: M,
     post_processor: Option<PP>,
@@ -336,10 +334,11 @@ pub struct Tokenizer<M, N, PT, PP, D> {
     padding: Option<PaddingParams>,
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl_downcast!(Normalizer);
+
+impl<M, PT, PP, D> Tokenizer<M, PT, PP, D>
 where
     M: Model,
-    N: Normalizer,
     PT: PreTokenizer,
     PP: PostProcessor,
     D: Decoder,
@@ -361,14 +360,22 @@ where
     }
 
     /// Set the normalizer
-    pub fn with_normalizer(&mut self, normalizer: N) -> &Self {
-        self.normalizer = Some(normalizer);
+    pub fn with_normalizer<N: 'static>(&mut self, normalizer: N) -> &Self where N: Normalizer {
+        self.normalizer = Some(Box::new(normalizer));
         self
     }
 
     /// Get the normalizer
-    pub fn get_normalizer(&self) -> Option<&N> {
-        self.normalizer.as_ref()
+    pub fn get_normalizer(&self) -> Option<&dyn Normalizer> {
+        self.normalizer.as_deref()
+    }
+
+    pub fn normalizer_as<N>(&self) -> Option<&N> where N: Normalizer {
+        self.normalizer
+            .as_deref()
+            .and_then(|n| {
+                n.downcast_ref()
+            })
     }
 
     /// Set the pre tokenizer
@@ -488,7 +495,7 @@ where
     pub fn normalize(&self, sentence: &str) -> Result<NormalizedString> {
         let mut normalized = self
             .added_vocabulary
-            .extract_and_normalize(self.normalizer.as_ref(), sentence)
+            .extract_and_normalize(self.normalizer.as_deref(), sentence)
             .into_iter()
             .map(|(mut sentence, id)| -> Result<NormalizedString> {
                 if id.is_some() {
@@ -520,7 +527,7 @@ where
         for subseq in sequence {
             let results = self
                 .added_vocabulary
-                .extract_and_normalize(self.normalizer.as_ref(), &subseq)
+                .extract_and_normalize(self.normalizer.as_deref(), &subseq)
                 .into_iter()
                 .map(
                     |(mut normalized, id)| -> Result<(Encoding, NormalizedString)> {
@@ -775,7 +782,7 @@ where
         self,
         trainer: &T,
         files: Vec<String>,
-    ) -> Result<Tokenizer<TM, N, PT, PP, D>>
+    ) -> Result<Tokenizer<TM, PT, PP, D>>
     where
         T: Trainer<Model = TM>,
         TM: Model,
@@ -872,20 +879,19 @@ where
     /// these special tokens while decoding
     pub fn add_special_tokens(&mut self, tokens: &[AddedToken]) -> usize {
         self.added_vocabulary
-            .add_special_tokens(tokens, &self.model, self.normalizer.as_ref())
+            .add_special_tokens(tokens, &self.model, self.normalizer.as_deref())
     }
 
     /// Add the given tokens to the added vocabulary
     pub fn add_tokens(&mut self, tokens: &[AddedToken]) -> usize {
         self.added_vocabulary
-            .add_tokens(tokens, &self.model, self.normalizer.as_ref())
+            .add_tokens(tokens, &self.model, self.normalizer.as_deref())
     }
 }
 
-impl<M, N, PT, PP, D> std::str::FromStr for Tokenizer<M, N, PT, PP, D>
+impl<M, PT, PP, D> std::str::FromStr for Tokenizer<M, PT, PP, D>
 where
     M: for<'de> Deserialize<'de> + Model,
-    N: for<'de> Deserialize<'de> + Normalizer,
     PT: for<'de> Deserialize<'de> + PreTokenizer,
     PP: for<'de> Deserialize<'de> + PostProcessor,
     D: for<'de> Deserialize<'de> + Decoder,
@@ -897,10 +903,9 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl<M, PT, PP, D> Tokenizer<M, PT, PP, D>
 where
     M: DeserializeOwned + Model,
-    N: DeserializeOwned + Normalizer,
     PT: DeserializeOwned + PreTokenizer,
     PP: DeserializeOwned + PostProcessor,
     D: DeserializeOwned + Decoder,
@@ -913,10 +918,9 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl<M, PT, PP, D> Tokenizer<M, PT, PP, D>
 where
     M: Serialize,
-    N: Serialize,
     PT: Serialize,
     PP: Serialize,
     D: Serialize,

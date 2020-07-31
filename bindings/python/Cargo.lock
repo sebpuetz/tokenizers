@@ -147,6 +147,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "either"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -624,6 +629,7 @@ name = "tokenizers"
 version = "0.10.1"
 dependencies = [
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "downcast-rs 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "indicatif 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "onig 6.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -753,6 +759,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum crossbeam-queue 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "c695eeca1e7173472a32221542ae469b3e9aac3a4fc81f7696bcad82029493db"
 "checksum crossbeam-utils 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)" = "c3c7c73a2d1e9fc0886a08b93e98eb643461230d5f1925e4036204d5f2e261a8"
 "checksum ctor 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "47c5e5ac752e18207b12e16b10631ae5f7f68f8805f335f9b817ead83d9ffce1"
+"checksum downcast-rs 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 "checksum either 1.5.3 (registry+https://github.com/rust-lang/crates.io-index)" = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
 "checksum encode_unicode 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 "checksum erased-serde 0.3.11 (registry+https://github.com/rust-lang/crates.io-index)" = "d88b6d1705e16a4d62e05ea61cc0496c2bd190f4fa8e5c1f11ce747be6bcf3d1"

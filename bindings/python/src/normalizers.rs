@@ -9,17 +9,18 @@ use tk::normalizers::bert::BertNormalizer;
 use tk::normalizers::strip::Strip;
 use tk::normalizers::unicode::{NFC, NFD, NFKC, NFKD};
 use tk::normalizers::utils::{Lowercase, Sequence};
+use tk::normalizers::NormalizerWrapper;
 use tk::{NormalizedString, Normalizer};
 use tokenizers as tk;
 
 #[pyclass(dict, module = "tokenizers.normalizers", name=Normalizer)]
 #[derive(Clone)]
 pub struct PyNormalizer {
-    pub normalizer: Arc<dyn Normalizer>,
+    pub normalizer: Arc<NormalizerWrapper>,
 }
 
 impl PyNormalizer {
-    pub fn new(normalizer: Arc<dyn Normalizer>) -> Self {
+    pub fn new(normalizer: Arc<NormalizerWrapper>) -> Self {
         PyNormalizer { normalizer }
     }
 }
@@ -103,7 +104,7 @@ impl PyBertNormalizer {
         }
         let normalizer =
             BertNormalizer::new(clean_text, handle_chinese_chars, strip_accents, lowercase);
-        Ok((PyBertNormalizer {}, PyNormalizer::new(Arc::new(normalizer))))
+        Ok((PyBertNormalizer {}, PyNormalizer::new(Arc::new(normalizer.into()))))
     }
 }
 
@@ -113,7 +114,7 @@ pub struct PyNFD {}
 impl PyNFD {
     #[new]
     fn new() -> PyResult<(Self, PyNormalizer)> {
-        Ok((PyNFD {}, PyNormalizer::new(Arc::new(NFD))))
+        Ok((PyNFD {}, PyNormalizer::new(Arc::new(NFD.into()))))
     }
 }
 
@@ -123,7 +124,7 @@ pub struct PyNFKD {}
 impl PyNFKD {
     #[new]
     fn new() -> PyResult<(Self, PyNormalizer)> {
-        Ok((PyNFKD {}, PyNormalizer::new(Arc::new(NFKD))))
+        Ok((PyNFKD {}, PyNormalizer::new(Arc::new(NFKD.into()))))
     }
 }
 
@@ -133,7 +134,7 @@ pub struct PyNFC {}
 impl PyNFC {
     #[new]
     fn new() -> PyResult<(Self, PyNormalizer)> {
-        Ok((PyNFC {}, PyNormalizer::new(Arc::new(NFC))))
+        Ok((PyNFC {}, PyNormalizer::new(Arc::new(NFC.into()))))
     }
 }
 
@@ -143,7 +144,7 @@ pub struct PyNFKC {}
 impl PyNFKC {
     #[new]
     fn new() -> PyResult<(Self, PyNormalizer)> {
-        Ok((PyNFKC {}, PyNormalizer::new(Arc::new(NFKC))))
+        Ok((PyNFKC {}, PyNormalizer::new(Arc::new(NFKC.into()))))
     }
 }
 
@@ -165,7 +166,7 @@ impl PySequence {
 
         Ok((
             PySequence {},
-            PyNormalizer::new(Arc::new(Sequence::new(normalizers))),
+            PyNormalizer::new(Arc::new(Sequence::new(normalizers).into())),
         ))
     }
 
@@ -180,7 +181,7 @@ pub struct PyLowercase {}
 impl PyLowercase {
     #[new]
     fn new() -> PyResult<(Self, PyNormalizer)> {
-        Ok((PyLowercase {}, PyNormalizer::new(Arc::new(Lowercase))))
+        Ok((PyLowercase {}, PyNormalizer::new(Arc::new(Lowercase.into()))))
     }
 }
 
@@ -205,7 +206,7 @@ impl PyStrip {
 
         Ok((
             PyStrip {},
-            PyNormalizer::new(Arc::new(Strip::new(left, right))),
+            PyNormalizer::new(Arc::new(Strip::new(left, right).into())),
         ))
     }
 }

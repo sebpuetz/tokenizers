@@ -30,6 +30,7 @@ name = "bpe_benchmark"
 harness = false
 
 [dependencies]
+downcast-rs = "1.2"
 lazy_static = "1.4"
 rand = "0.7"
 onig = { version = "6.0", default-features = false }

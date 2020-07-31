@@ -15,6 +15,7 @@ use std::{
     fs::File,
     io::prelude::*,
     io::BufReader,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
 
@@ -23,6 +24,12 @@ use serde::de::DeserializeOwned;
 use serde::export::Formatter;
 use serde::{Deserialize, Serialize};
 
+use crate::decoders::DecoderWrapper;
+use crate::models::ModelWrapper;
+use crate::normalizers::NormalizerWrapper;
+use crate::pre_tokenizers::PreTokenizerWrapper;
+use crate::processors::PostProcessorWrapper;
+pub use crate::utils::iter::LinesWithEnding;
 use crate::utils::iter::ResultShunt;
 use crate::utils::parallelism::*;
 
@@ -31,7 +38,6 @@ mod encoding;
 mod normalizer;
 mod serialization;
 
-pub use crate::utils::iter::LinesWithEnding;
 pub use crate::utils::padding::{pad_encodings, PaddingDirection, PaddingParams, PaddingStrategy};
 pub use crate::utils::truncation::{truncate_encodings, TruncationParams, TruncationStrategy};
 pub use added_vocabulary::*;
@@ -258,11 +264,11 @@ where
     /// Convert the TokenizerBuilder to a Tokenizer.
     ///
     /// Conversion fails if the `model` is missing.
-    pub fn build(self) -> Result<Tokenizer<M, N, PT, PP, D>> {
+    pub fn build(self) -> Result<TokenizerImpl<M, N, PT, PP, D>> {
         let model = self
             .model
             .ok_or_else(|| Box::new(BuilderError("Model missing.".into())))?;
-        Ok(Tokenizer {
+        Ok(TokenizerImpl {
             normalizer: self.normalizer,
             pre_tokenizer: self.pre_tokenizer,
             model,
@@ -318,9 +324,82 @@ where
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Tokenizer(
+    TokenizerImpl<
+        ModelWrapper,
+        NormalizerWrapper,
+        PreTokenizerWrapper,
+        PostProcessorWrapper,
+        DecoderWrapper,
+    >,
+);
+
+impl Tokenizer {
+    /// Construct a new Tokenizer based on the model.
+    pub fn new(model: impl Into<ModelWrapper>) -> Self {
+        Self(TokenizerImpl::new(model.into()))
+    }
+
+    /// Unwrap the TokenizerImpl.
+    pub fn into_inner(
+        self,
+    ) -> TokenizerImpl<
+        ModelWrapper,
+        NormalizerWrapper,
+        PreTokenizerWrapper,
+        PostProcessorWrapper,
+        DecoderWrapper,
+    > {
+        self.0
+    }
+}
+
+impl<M, N, PT, PP, D> From<TokenizerImpl<M, N, PT, PP, D>> for Tokenizer
+where
+    M: Into<ModelWrapper>,
+    N: Into<NormalizerWrapper>,
+    PT: Into<PreTokenizerWrapper>,
+    PP: Into<PostProcessorWrapper>,
+    D: Into<DecoderWrapper>,
+{
+    fn from(t: TokenizerImpl<M, N, PT, PP, D>) -> Self {
+        Self(TokenizerImpl {
+            model: t.model.into(),
+            normalizer: t.normalizer.map(Into::into),
+            pre_tokenizer: t.pre_tokenizer.map(Into::into),
+            post_processor: t.post_processor.map(Into::into),
+            decoder: t.decoder.map(Into::into),
+            added_vocabulary: t.added_vocabulary,
+            padding: t.padding,
+            truncation: t.truncation,
+        })
+    }
+}
+
+impl Deref for Tokenizer {
+    type Target = TokenizerImpl<
+        ModelWrapper,
+        NormalizerWrapper,
+        PreTokenizerWrapper,
+        PostProcessorWrapper,
+        DecoderWrapper,
+    >;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Tokenizer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// A `Tokenizer` is capable of encoding/decoding any text.
 #[derive(Clone)]
-pub struct Tokenizer<M, N, PT, PP, D> {
+pub struct TokenizerImpl<M, N, PT, PP, D> {
     // Tokenizer parts
     normalizer: Option<N>,
     pre_tokenizer: Option<PT>,
@@ -336,7 +415,7 @@ pub struct Tokenizer<M, N, PT, PP, D> {
     padding: Option<PaddingParams>,
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl<M, N, PT, PP, D> TokenizerImpl<M, N, PT, PP, D>
 where
     M: Model,
     N: Normalizer,
@@ -346,7 +425,7 @@ where
 {
     /// Instantiate a new Tokenizer, with the given Model
     pub fn new(model: M) -> Self {
-        Tokenizer {
+        TokenizerImpl {
             normalizer: None,
             pre_tokenizer: None,
             model,
@@ -361,8 +440,8 @@ where
     }
 
     /// Set the normalizer
-    pub fn with_normalizer(&mut self, normalizer: N) -> &Self {
-        self.normalizer = Some(normalizer);
+    pub fn with_normalizer(&mut self, normalizer: impl Into<N>) -> &Self {
+        self.normalizer = Some(normalizer.into());
         self
     }
 
@@ -372,8 +451,8 @@ where
     }
 
     /// Set the pre tokenizer
-    pub fn with_pre_tokenizer(&mut self, pre_tokenizer: PT) -> &Self {
-        self.pre_tokenizer = Some(pre_tokenizer);
+    pub fn with_pre_tokenizer(&mut self, pre_tokenizer: impl Into<PT>) -> &Self {
+        self.pre_tokenizer = Some(pre_tokenizer.into());
         self
     }
 
@@ -383,8 +462,8 @@ where
     }
 
     /// Set the post processor
-    pub fn with_post_processor(&mut self, post_processor: PP) -> &Self {
-        self.post_processor = Some(post_processor);
+    pub fn with_post_processor(&mut self, post_processor: impl Into<PP>) -> &Self {
+        self.post_processor = Some(post_processor.into());
         self
     }
 
@@ -394,8 +473,8 @@ where
     }
 
     /// Set the decoder
-    pub fn with_decoder(&mut self, decoder: D) -> &Self {
-        self.decoder = Some(decoder);
+    pub fn with_decoder(&mut self, decoder: impl Into<D>) -> &Self {
+        self.decoder = Some(decoder.into());
         self
     }
 
@@ -405,8 +484,8 @@ where
     }
 
     /// Set the model
-    pub fn with_model(&mut self, model: M) -> &mut Self {
-        self.model = model;
+    pub fn with_model(&mut self, model: impl Into<M>) -> &mut Self {
+        self.model = model.into();
         self
     }
 
@@ -594,13 +673,7 @@ where
     /// # use tokenizers::pre_tokenizers::PreTokenizerWrapper;
     /// # use tokenizers::processors::PostProcessorWrapper;
     /// # use tokenizers::decoders::DecoderWrapper;
-    /// # let mut tokenizer =
-    /// #     Tokenizer::<_,
-    /// #             NormalizerWrapper,
-    /// #             PreTokenizerWrapper,
-    /// #             PostProcessorWrapper,
-    /// #             DecoderWrapper
-    /// #         >::new(BPE::default());
+    /// # let mut tokenizer = Tokenizer::new(BPE::default());
     /// #
     /// // Sequences:
     /// tokenizer.encode("Single sequence", false);
@@ -775,7 +848,7 @@ where
         self,
         trainer: &T,
         files: Vec<String>,
-    ) -> Result<Tokenizer<TM, N, PT, PP, D>>
+    ) -> Result<TokenizerImpl<TM, N, PT, PP, D>>
     where
         T: Trainer<Model = TM>,
         TM: Model,
@@ -783,7 +856,7 @@ where
         let words = self.word_count(trainer, files)?;
 
         let (model, special_tokens) = trainer.train(words)?;
-        let mut new_tok = Tokenizer {
+        let mut new_tok = TokenizerImpl {
             normalizer: self.normalizer,
             pre_tokenizer: self.pre_tokenizer,
             model,
@@ -882,7 +955,7 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> std::str::FromStr for Tokenizer<M, N, PT, PP, D>
+impl<M, N, PT, PP, D> std::str::FromStr for TokenizerImpl<M, N, PT, PP, D>
 where
     M: for<'de> Deserialize<'de> + Model,
     N: for<'de> Deserialize<'de> + Normalizer,
@@ -897,7 +970,7 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl<M, N, PT, PP, D> TokenizerImpl<M, N, PT, PP, D>
 where
     M: DeserializeOwned + Model,
     N: DeserializeOwned + Normalizer,
@@ -913,7 +986,7 @@ where
     }
 }
 
-impl<M, N, PT, PP, D> Tokenizer<M, N, PT, PP, D>
+impl<M, N, PT, PP, D> TokenizerImpl<M, N, PT, PP, D>
 where
     M: Serialize,
     N: Serialize,

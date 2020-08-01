@@ -3,7 +3,8 @@ use crate::tokenizer::{
     Decoder, Encoding, NormalizedString, Offsets, PostProcessor, PreTokenizer, Result,
 };
 use onig::Regex;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 
 fn bytes_char() -> HashMap<u8, char> {
@@ -38,7 +39,7 @@ lazy_static! {
         bytes_char().into_iter().map(|(c, b)| (b, c)).collect();
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize, Copy, Clone, Debug)]
 /// Provides all the necessary steps to handle the BPE tokenization at the byte-level. Takes care
 /// of all the required processing steps to transform a UTF-8 string as needed before and after the
 /// BPE model does its job.
@@ -84,7 +85,6 @@ impl ByteLevel {
 /// As a `PreTokenizer`, `ByteLevel` is in charge of transforming all the unicode characters into
 /// their byte-level counterpart. It also splits the input according to the configured regex.
 // TODO: Give the ability to modify this regex
-#[typetag::serde]
 impl PreTokenizer for ByteLevel {
     fn pre_tokenize(&self, normalized: &mut NormalizedString) -> Result<Vec<(String, Offsets)>> {
         if self.add_prefix_space && !normalized.get().starts_with(' ') {
@@ -151,7 +151,6 @@ impl PreTokenizer for ByteLevel {
 
 /// As a `Decoder`, `ByteLevel` is in charge of converting any byte-level characters to their
 /// unicode counterpart, before merging everything back into a single String.
-#[typetag::serde]
 impl Decoder for ByteLevel {
     fn decode(&self, tokens: Vec<String>) -> Result<String> {
         let toks = tokens
@@ -172,7 +171,6 @@ impl Decoder for ByteLevel {
 }
 
 /// As a `PostProcessor`, `ByteLevel` is in charge of trimming the offsets if necessary.
-#[typetag::serde]
 impl PostProcessor for ByteLevel {
     fn added_tokens(&self, _is_pair: bool) -> usize {
         0
@@ -240,6 +238,19 @@ pub fn process_offsets(encoding: &mut Encoding, add_prefix_space: bool) {
             offsets.1 = std::cmp::max(offsets.1 - tl, offsets.0);
         }
     });
+}
+
+impl Serialize for ByteLevel {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut m = serializer.serialize_struct("ByteLevel", 3)?;
+        m.serialize_field("type", "ByteLevel")?;
+        m.serialize_field("add_prefix_space", &self.add_prefix_space)?;
+        m.serialize_field("trim_offsets", &self.trim_offsets)?;
+        m.end()
+    }
 }
 
 #[cfg(test)]

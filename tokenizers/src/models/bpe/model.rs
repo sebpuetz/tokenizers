@@ -374,7 +374,6 @@ impl BPE {
     }
 }
 
-#[typetag::serde]
 impl Model for BPE {
     fn get_vocab(&self) -> &HashMap<String, u32> {
         &self.vocab

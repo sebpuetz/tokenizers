@@ -11,6 +11,7 @@ use tk::pre_tokenizers::byte_level::ByteLevel;
 use tk::pre_tokenizers::delimiter::CharDelimiterSplit;
 use tk::pre_tokenizers::metaspace::Metaspace;
 use tk::pre_tokenizers::whitespace::{Whitespace, WhitespaceSplit};
+use tk::pre_tokenizers::PreTokenizerWrapper;
 use tk::tokenizer::Offsets;
 use tk::{NormalizedString, PreTokenizer};
 use tokenizers as tk;
@@ -18,36 +19,48 @@ use tokenizers as tk;
 use super::error::{PyError, ToPyResult};
 
 #[pyclass(dict, module = "tokenizers.pre_tokenizers", name=PreTokenizer)]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PyPreTokenizer {
-    pub pretok: Arc<dyn PreTokenizer>,
+    #[serde(flatten)]
+    pub(crate) pretok: PyPreTokenizerWrapper,
 }
 
 impl PyPreTokenizer {
-    pub fn new(pretok: Arc<dyn PreTokenizer>) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn new(pretok: PyPreTokenizerWrapper) -> Self {
         PyPreTokenizer { pretok }
     }
-}
 
-impl Serialize for PyPreTokenizer {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.pretok.serialize(serializer)
+    pub(crate) fn get_as_subtype(&self) -> PyResult<PyObject> {
+        let base = self.clone();
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        match &self.pretok {
+            PyPreTokenizerWrapper::Custom(_) => Py::new(py, base).map(Into::into),
+            PyPreTokenizerWrapper::Wrapped(inner) => match inner.as_ref() {
+                PreTokenizerWrapper::Whitespace(_) => {
+                    Py::new(py, (PyWhitespace {}, base)).map(Into::into)
+                }
+                PreTokenizerWrapper::Metaspace(_) => {
+                    Py::new(py, (PyMetaspace {}, base)).map(Into::into)
+                }
+                PreTokenizerWrapper::Delimiter(_) => {
+                    Py::new(py, (PyCharDelimiterSplit {}, base)).map(Into::into)
+                }
+                PreTokenizerWrapper::WhitespaceSplit(_) => {
+                    Py::new(py, (PyWhitespaceSplit {}, base)).map(Into::into)
+                }
+                PreTokenizerWrapper::ByteLevel(_) => {
+                    Py::new(py, (PyByteLevel {}, base)).map(Into::into)
+                }
+                PreTokenizerWrapper::BertPreTokenizer(_) => {
+                    Py::new(py, (PyBertPreTokenizer {}, base)).map(Into::into)
+                }
+            },
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for PyPreTokenizer {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Arc::deserialize(deserializer).map(PyPreTokenizer::new)
-    }
-}
-
-#[typetag::serde]
 impl PreTokenizer for PyPreTokenizer {
     fn pre_tokenize(
         &self,
@@ -63,12 +76,12 @@ impl PyPreTokenizer {
     fn custom(pretok: PyObject) -> PyResult<Self> {
         let py_pretok = CustomPreTokenizer::new(pretok)?;
         Ok(PyPreTokenizer {
-            pretok: Arc::new(py_pretok),
+            pretok: PyPreTokenizerWrapper::Custom(Arc::new(py_pretok)),
         })
     }
 
     fn __getstate__(&self, py: Python) -> PyResult<PyObject> {
-        let data = serde_json::to_string(&self.pretok.as_ref()).map_err(|e| {
+        let data = serde_json::to_string(&self.pretok).map_err(|e| {
             exceptions::Exception::py_err(format!(
                 "Error while attempting to pickle PreTokenizer: {}",
                 e.to_string()
@@ -120,7 +133,7 @@ impl PyByteLevel {
             }
         }
 
-        Ok((PyByteLevel {}, PyPreTokenizer::new(Arc::new(byte_level))))
+        Ok((PyByteLevel {}, byte_level.into()))
     }
 
     #[staticmethod]
@@ -138,7 +151,7 @@ pub struct PyWhitespace {}
 impl PyWhitespace {
     #[new]
     fn new() -> PyResult<(Self, PyPreTokenizer)> {
-        Ok((PyWhitespace {}, PyPreTokenizer::new(Arc::new(Whitespace))))
+        Ok((PyWhitespace {}, Whitespace.into()))
     }
 }
 
@@ -148,10 +161,7 @@ pub struct PyWhitespaceSplit {}
 impl PyWhitespaceSplit {
     #[new]
     fn new() -> PyResult<(Self, PyPreTokenizer)> {
-        Ok((
-            PyWhitespaceSplit {},
-            PyPreTokenizer::new(Arc::new(WhitespaceSplit)),
-        ))
+        Ok((PyWhitespaceSplit {}, WhitespaceSplit.into()))
     }
 }
 
@@ -169,7 +179,7 @@ impl PyCharDelimiterSplit {
             ))?;
         Ok((
             PyCharDelimiterSplit {},
-            PyPreTokenizer::new(Arc::new(CharDelimiterSplit::new(chr_delimiter))),
+            CharDelimiterSplit::new(chr_delimiter).into(),
         ))
     }
 
@@ -184,10 +194,7 @@ pub struct PyBertPreTokenizer {}
 impl PyBertPreTokenizer {
     #[new]
     fn new() -> PyResult<(Self, PyPreTokenizer)> {
-        Ok((
-            PyBertPreTokenizer {},
-            PyPreTokenizer::new(Arc::new(BertPreTokenizer)),
-        ))
+        Ok((PyBertPreTokenizer {}, BertPreTokenizer.into()))
     }
 }
 
@@ -219,12 +226,12 @@ impl PyMetaspace {
 
         Ok((
             PyMetaspace {},
-            PyPreTokenizer::new(Arc::new(Metaspace::new(replacement, add_prefix_space))),
+            Metaspace::new(replacement, add_prefix_space).into(),
         ))
     }
 }
 
-struct CustomPreTokenizer {
+pub(crate) struct CustomPreTokenizer {
     class: PyObject,
 }
 
@@ -234,7 +241,6 @@ impl CustomPreTokenizer {
     }
 }
 
-#[typetag::serde]
 impl tk::tokenizer::PreTokenizer for CustomPreTokenizer {
     fn pre_tokenize(&self, sentence: &mut NormalizedString) -> tk::Result<Vec<(String, Offsets)>> {
         let gil = Python::acquire_gil();
@@ -280,5 +286,88 @@ impl<'de> Deserialize<'de> for CustomPreTokenizer {
         D: Deserializer<'de>,
     {
         Err(D::Error::custom("PyDecoder cannot be deserialized"))
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub(crate) enum PyPreTokenizerWrapper {
+    Custom(Arc<CustomPreTokenizer>),
+    Wrapped(Arc<PreTokenizerWrapper>),
+}
+
+impl<I> From<I> for PyPreTokenizerWrapper
+where
+    I: Into<PreTokenizerWrapper>,
+{
+    fn from(norm: I) -> Self {
+        PyPreTokenizerWrapper::Wrapped(Arc::new(norm.into()))
+    }
+}
+
+impl<I> From<I> for PyPreTokenizer
+where
+    I: Into<PreTokenizerWrapper>,
+{
+    fn from(pretok: I) -> Self {
+        PyPreTokenizer {
+            pretok: pretok.into().into(),
+        }
+    }
+}
+
+impl PreTokenizer for PyPreTokenizerWrapper {
+    fn pre_tokenize(
+        &self,
+        normalized: &mut NormalizedString,
+    ) -> tk::Result<Vec<(String, (usize, usize))>> {
+        match self {
+            PyPreTokenizerWrapper::Wrapped(inner) => inner.pre_tokenize(normalized),
+            PyPreTokenizerWrapper::Custom(inner) => inner.pre_tokenize(normalized),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use pyo3::{AsPyRef, Py, PyObject, Python};
+    use tk::pre_tokenizers::whitespace::Whitespace;
+    use tk::pre_tokenizers::PreTokenizerWrapper;
+
+    use crate::pre_tokenizers::{CustomPreTokenizer, PyPreTokenizer, PyPreTokenizerWrapper};
+    use std::sync::Arc;
+
+    #[test]
+    fn get_subtype() {
+        let py_norm = PyPreTokenizer::new(Whitespace.into());
+        let py_wsp = py_norm.get_as_subtype().unwrap();
+        let gil = Python::acquire_gil();
+        assert_eq!(
+            "tokenizers.pre_tokenizers.Whitespace",
+            py_wsp.as_ref(gil.python()).get_type().name()
+        );
+    }
+
+    #[test]
+    fn serialize() {
+        let py_wrapped: PyPreTokenizerWrapper = Whitespace.into();
+        let py_ser = serde_json::to_string(&py_wrapped).unwrap();
+        let rs_wrapped = PreTokenizerWrapper::Whitespace(Whitespace);
+        let rs_ser = serde_json::to_string(&rs_wrapped).unwrap();
+        assert_eq!(py_ser, rs_ser);
+        let py_pretok: PyPreTokenizer = serde_json::from_str(&rs_ser).unwrap();
+        match py_pretok.pretok {
+            PyPreTokenizerWrapper::Wrapped(wsp) => match wsp.as_ref() {
+                PreTokenizerWrapper::Whitespace(_) => {}
+                _ => panic!("Expected Whitespace"),
+            },
+            _ => panic!("Expected wrapped, not custom."),
+        }
+        let gil = Python::acquire_gil();
+        let py_wsp = PyPreTokenizer::new(Whitespace.into());
+        let obj: PyObject = Py::new(gil.python(), py_wsp).unwrap().into();
+        let py_seq: PyPreTokenizerWrapper =
+            PyPreTokenizerWrapper::Custom(Arc::new(CustomPreTokenizer::new(obj).unwrap()));
+        assert!(serde_json::to_string(&py_seq).is_err());
     }
 }

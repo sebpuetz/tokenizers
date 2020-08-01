@@ -7,8 +7,8 @@ use pyo3::types::*;
 use pyo3::PyObjectProtocol;
 use tk::models::bpe::BPE;
 use tk::tokenizer::{
-    PaddingDirection, PaddingParams, PaddingStrategy, PostProcessor, TokenizerImpl, TruncationParams,
-    TruncationStrategy,
+    PaddingDirection, PaddingParams, PaddingStrategy, PostProcessor, TokenizerImpl,
+    TruncationParams, TruncationStrategy,
 };
 use tokenizers as tk;
 
@@ -689,8 +689,8 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_model(&self) -> PyModel {
-        self.tokenizer.get_model().clone()
+    fn get_model(&self) -> PyResult<PyObject> {
+        self.tokenizer.get_model().get_as_subtype()
     }
 
     #[setter]
@@ -699,8 +699,12 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_normalizer(&self) -> Option<PyNormalizer> {
-        self.tokenizer.get_normalizer().cloned()
+    fn get_normalizer(&self) -> PyResult<PyObject> {
+        if let Some(n) = self.tokenizer.get_normalizer() {
+            n.get_as_subtype()
+        } else {
+            Ok(Python::acquire_gil().python().None())
+        }
     }
 
     #[setter]
@@ -709,8 +713,12 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_pre_tokenizer(&self) -> Option<PyPreTokenizer> {
-        self.tokenizer.get_pre_tokenizer().cloned()
+    fn get_pre_tokenizer(&self) -> PyResult<PyObject> {
+        if let Some(pt) = self.tokenizer.get_pre_tokenizer() {
+            pt.get_as_subtype()
+        } else {
+            Ok(Python::acquire_gil().python().None())
+        }
     }
 
     #[setter]
@@ -719,8 +727,12 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_post_processor(&self) -> Option<PyPostProcessor> {
-        self.tokenizer.get_post_processor().cloned()
+    fn get_post_processor(&self) -> PyResult<PyObject> {
+        if let Some(n) = self.tokenizer.get_post_processor() {
+            n.get_as_subtype()
+        } else {
+            Ok(Python::acquire_gil().python().None())
+        }
     }
 
     #[setter]
@@ -729,8 +741,12 @@ impl PyTokenizer {
     }
 
     #[getter]
-    fn get_decoder(&self) -> Option<PyDecoder> {
-        self.tokenizer.get_decoder().cloned()
+    fn get_decoder(&self) -> PyResult<PyObject> {
+        if let Some(dec) = self.tokenizer.get_decoder() {
+            dec.get_as_subtype()
+        } else {
+            Ok(Python::acquire_gil().python().None())
+        }
     }
 
     #[setter]

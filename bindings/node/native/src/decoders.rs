@@ -15,7 +15,6 @@ pub struct Decoder {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct JsInitDecoder(pub Arc<DecoderWrapper>);
 
-#[typetag::serde]
 impl tk::Decoder for JsInitDecoder {
     fn decode(&self, tokens: Vec<String>) -> tk::Result<String> {
         self.0.decode(tokens)

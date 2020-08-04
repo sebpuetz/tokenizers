@@ -19,7 +19,6 @@ pub struct Model {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct JsInitModel(pub Arc<ModelWrapper>);
 
-#[typetag::serde]
 impl tk::Model for JsInitModel {
     fn tokenize(&self, tokens: &str) -> tk::Result<Vec<tk::Token>> {
         self.0.tokenize(tokens)

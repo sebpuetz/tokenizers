@@ -14,7 +14,6 @@ pub struct PreTokenizer {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct JsInitPreTokenizer(pub Arc<PreTokenizerWrapper>);
 
-#[typetag::serde]
 impl tk::PreTokenizer for JsInitPreTokenizer {
     fn pre_tokenize(&self, normalized: &mut tk::PreTokenizedString) -> tk::Result<()> {
         self.0.pre_tokenize(normalized)

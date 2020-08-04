@@ -345,7 +345,7 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<
+pub type TkTokenizer = tk::TokenizerImpl<
     JsInitModel,
     JsNormalizerWrapper,
     JsInitPreTokenizer,

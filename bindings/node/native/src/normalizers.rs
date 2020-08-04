@@ -204,7 +204,6 @@ where
     }
 }
 
-#[typetag::serde]
 impl tk::Normalizer for JsNormalizerWrapper {
     fn normalize(&self, normalized: &mut tk::NormalizedString) -> tk::Result<()> {
         match self {

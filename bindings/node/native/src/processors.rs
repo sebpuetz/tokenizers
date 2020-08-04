@@ -14,7 +14,6 @@ pub struct Processor {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct JsInitProcessor(pub Arc<PostProcessorWrapper>);
 
-#[typetag::serde]
 impl tk::PostProcessor for JsInitProcessor {
     fn added_tokens(&self, is_pair: bool) -> usize {
         self.0.added_tokens(is_pair)

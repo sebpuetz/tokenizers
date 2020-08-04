@@ -1,14 +1,13 @@
 extern crate tokenizers as tk;
 
-use crate::container::Container;
 use crate::extraction::*;
 use crate::tokenizer::AddedToken;
 use neon::prelude::*;
-use tk::models::{bpe::BpeTrainer, wordpiece::WordPieceTrainer};
+use tk::models::{bpe::BpeTrainer, wordpiece::WordPieceTrainer, TrainerWrapper};
 
 /// Trainer
 pub struct Trainer {
-    pub trainer: Container<dyn tk::tokenizer::Trainer>,
+    pub trainer: Option<TrainerWrapper>,
 }
 
 declare_types! {
@@ -16,7 +15,7 @@ declare_types! {
         init(_) {
             // This should not be called from JS
             Ok(Trainer {
-                trainer: Container::Empty
+                trainer: None
             })
         }
     }
@@ -112,7 +111,7 @@ fn bpe_trainer(mut cx: FunctionContext) -> JsResult<JsTrainer> {
     js_trainer
         .borrow_mut(&guard)
         .trainer
-        .make_owned(Box::new(trainer));
+        .replace(trainer.into());
 
     Ok(js_trainer)
 }
@@ -207,7 +206,7 @@ fn wordpiece_trainer(mut cx: FunctionContext) -> JsResult<JsTrainer> {
     js_trainer
         .borrow_mut(&guard)
         .trainer
-        .make_owned(Box::new(trainer));
+        .replace(trainer.into());
 
     Ok(js_trainer)
 }

@@ -4,12 +4,11 @@ use crate::container::Container;
 use crate::decoders::JsDecoder;
 use crate::encoding::JsEncoding;
 use crate::extraction::*;
-use crate::models::JsModel;
+use crate::models::{JsModel, JsInitModel};
 use crate::normalizers::JsNormalizer;
 use crate::pre_tokenizers::JsPreTokenizer;
 use crate::processors::JsPostProcessor;
 use crate::tasks::tokenizer::{DecodeTask, EncodeTask, WorkingTokenizer};
-use crate::trainers::JsTrainer;
 use neon::prelude::*;
 
 // AddedToken
@@ -343,9 +342,11 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
+pub type TkTokenizer = tk::Tokenizer<JsInitModel>;
+
 /// Tokenizer
 pub struct Tokenizer {
-    tokenizer: tk::Tokenizer,
+    tokenizer: TkTokenizer,
 
     /// Whether we have a running task. We keep this to make sure we never
     /// modify the underlying tokenizer while a task is running
@@ -375,19 +376,14 @@ declare_types! {
     pub class JsTokenizer for Tokenizer {
         init(mut cx) {
             // init(model: JsModel)
-            let mut model = cx.argument::<JsModel>(0)?;
-            if let Some(instance) = {
-                let guard = cx.lock();
-                let mut model = model.borrow_mut(&guard);
-                model.model.make_pointer()
-            } {
-                Ok(Tokenizer {
-                    tokenizer: tk::Tokenizer::new(instance),
-                    running_task: std::sync::Arc::new(())
-                })
-            } else {
-                cx.throw_error("The Model is already being used in another Tokenizer")
-            }
+            let model = cx.argument::<JsModel>(0)?;
+            let guard = cx.lock();
+            let model = model.borrow(&guard).model.clone().unwrap();
+
+            Ok(Tokenizer {
+                tokenizer: TkTokenizer::new(model),
+                running_task: std::sync::Arc::new(())
+            })
         }
 
         method toString(mut cx) {
@@ -748,19 +744,21 @@ declare_types! {
 
         method train(mut cx) {
             // train(trainer: JsTrainer, files: string[])
+            // TODO temporarily disabled until Tokenizer is cloneable
 
-            let trainer = cx.argument::<JsTrainer>(0)?;
-            let files = cx.extract::<Vec<String>>(1)?;
+            // let trainer = cx.argument::<JsTrainer>(0)?;
+            // let files = cx.extract::<Vec<String>>(1)?;
+            //
+            // let this = cx.this();
+            // let guard = cx.lock();
 
-            let mut this = cx.this();
-            let guard = cx.lock();
 
-            trainer.borrow(&guard).trainer.execute(|trainer| {
-                this.borrow_mut(&guard)
-                    .tokenizer
-                    .train(trainer.unwrap(), files)
-                    .map_err(|e| Error(format!("{}", e)))
-            })?;
+            // let trainer = trainer.borrow(&guard);
+            // let trainer = trainer.trainer.as_ref().unwrap();
+            // let tokenizer = this.borrow_mut(&guard)
+            //     .tokenizer
+            //     .train(trainer, files)
+            //     .map_err(|e| Error(format!("{}", e)))?;
 
             Ok(cx.undefined().upcast())
         }
@@ -798,11 +796,11 @@ declare_types! {
 
             let this = cx.this();
             let guard = cx.lock();
-            let model = Container::from_ref(this.borrow(&guard).tokenizer.get_model());
+            let model = this.borrow(&guard).tokenizer.get_model().clone();
 
             let mut js_model = JsModel::new::<_, JsModel, _>(&mut cx, vec![])?;
             let guard = cx.lock();
-            js_model.borrow_mut(&guard).model = model;
+            js_model.borrow_mut(&guard).model.replace(model);
 
             Ok(js_model.upcast())
         }
@@ -811,23 +809,16 @@ declare_types! {
             // setModel(model: JsModel)
             check_tokenizer_can_be_modified!(cx);
 
-            let mut model = cx.argument::<JsModel>(0)?;
-            if let Some(instance) = {
+            let model = cx.argument::<JsModel>(0)?;
+            let guard = cx.lock();
+            let model = model.borrow(&guard).model.clone().unwrap();
+            let mut this = cx.this();
+            {
                 let guard = cx.lock();
-                let mut model = model.borrow_mut(&guard);
-                model.model.make_pointer()
-            } {
-                let mut this = cx.this();
-                {
-                    let guard = cx.lock();
-                    let mut tokenizer = this.borrow_mut(&guard);
-                    tokenizer.tokenizer.with_model(instance);
-                }
-
-                Ok(cx.undefined().upcast())
-            } else {
-                cx.throw_error("The Model is already being used in another Tokenizer")
+                let mut tokenizer = this.borrow_mut(&guard);
+                tokenizer.tokenizer.with_model(model);
             }
+            Ok(cx.undefined().upcast())
         }
 
         method getNormalizer(mut cx) {
@@ -1016,7 +1007,7 @@ declare_types! {
 pub fn tokenizer_from_string(mut cx: FunctionContext) -> JsResult<JsTokenizer> {
     let s = cx.extract::<String>(0)?;
 
-    let tokenizer: tk::tokenizer::Tokenizer = s
+    let tokenizer: TkTokenizer = s
         .parse()
         .map_err(|e| cx.throw_error::<_, ()>(format!("{}", e)).unwrap_err())?;
 

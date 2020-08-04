@@ -10,6 +10,7 @@ use crate::pre_tokenizers::JsPreTokenizer;
 use crate::processors::JsPostProcessor;
 use crate::tasks::tokenizer::{DecodeTask, EncodeTask, WorkingTokenizer};
 use neon::prelude::*;
+use normalizers::JsNormalizerWrapper;
 
 // AddedToken
 
@@ -342,7 +343,7 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<JsInitModel>;
+pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper>;
 
 /// Tokenizer
 pub struct Tokenizer {
@@ -828,14 +829,13 @@ declare_types! {
                 let this = cx.this();
                 let guard = cx.lock();
                 let borrowed = this.borrow(&guard);
-                let normalizer = borrowed.tokenizer.get_normalizer();
-                normalizer.map(|normalizer| { Container::from_ref(normalizer) })
+                borrowed.tokenizer.get_normalizer().cloned()
             };
 
             if let Some(normalizer) = normalizer {
                 let mut js_normalizer = JsNormalizer::new::<_, JsNormalizer, _>(&mut cx, vec![])?;
                 let guard = cx.lock();
-                js_normalizer.borrow_mut(&guard).normalizer = normalizer;
+                js_normalizer.borrow_mut(&guard).normalizer.replace(normalizer);
 
                 Ok(js_normalizer.upcast())
             } else {
@@ -847,23 +847,19 @@ declare_types! {
             // setNormalizer(normalizer: Normalizer)
             check_tokenizer_can_be_modified!(cx);
 
-            let mut normalizer = cx.argument::<JsNormalizer>(0)?;
-            if let Some(instance) = {
+            let normalizer = cx.argument::<JsNormalizer>(0)?;
+            let normalizer = {
                 let guard = cx.lock();
-                let mut normalizer = normalizer.borrow_mut(&guard);
-                normalizer.normalizer.make_pointer()
-            } {
-                let mut this = cx.this();
-                {
-                    let guard = cx.lock();
-                    let mut tokenizer = this.borrow_mut(&guard);
-                    tokenizer.tokenizer.with_normalizer(instance);
-                }
-
-                Ok(cx.undefined().upcast())
-            } else {
-                cx.throw_error("The Normalizer is already being used in another Tokenizer")
+                let normalizer = normalizer.borrow(&guard);
+                normalizer.normalizer.clone().unwrap()
+            };
+            let mut this = cx.this();
+            {
+                let guard = cx.lock();
+                let mut tokenizer = this.borrow_mut(&guard);
+                tokenizer.tokenizer.with_normalizer(normalizer);
             }
+            Ok(cx.undefined().upcast())
         }
 
         method getPreTokenizer(mut cx) {

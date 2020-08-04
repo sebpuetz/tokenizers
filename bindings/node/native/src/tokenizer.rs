@@ -1,6 +1,5 @@
 extern crate tokenizers as tk;
 
-use crate::container::Container;
 use crate::decoders::JsDecoder;
 use crate::encoding::JsEncoding;
 use crate::extraction::*;
@@ -13,6 +12,7 @@ use neon::prelude::*;
 use normalizers::JsNormalizerWrapper;
 use pre_tokenizers::JsInitPreTokenizer;
 use processors::JsInitProcessor;
+use decoders::JsInitDecoder;
 
 // AddedToken
 
@@ -345,7 +345,7 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer, JsInitProcessor>;
+pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer, JsInitProcessor, JsInitDecoder>;
 
 /// Tokenizer
 pub struct Tokenizer {
@@ -952,14 +952,13 @@ declare_types! {
                 let this = cx.this();
                 let guard = cx.lock();
                 let borrowed = this.borrow(&guard);
-                let decoder = borrowed.tokenizer.get_decoder();
-                decoder.map(|decoder| { Container::from_ref(decoder) })
+                borrowed.tokenizer.get_decoder().cloned()
             };
 
             if let Some(decoder) = decoder {
                 let mut js_decoder = JsDecoder::new::<_, JsDecoder, _>(&mut cx, vec![])?;
                 let guard = cx.lock();
-                js_decoder.borrow_mut(&guard).decoder = decoder;
+                js_decoder.borrow_mut(&guard).decoder.replace(decoder);
 
                 Ok(js_decoder.upcast())
             } else {
@@ -970,24 +969,19 @@ declare_types! {
         method setDecoder(mut cx) {
             // setDecoder(decoder: Decoder)
             check_tokenizer_can_be_modified!(cx);
-
-            let mut decoder = cx.argument::<JsDecoder>(0)?;
-            if let Some(instance) = {
+            let decoder = cx.argument::<JsDecoder>(0)?;
+            let decoder = {
                 let guard = cx.lock();
-                let mut decoder = decoder.borrow_mut(&guard);
-                decoder.decoder.make_pointer()
-            } {
-                let mut this = cx.this();
-                {
-                    let guard = cx.lock();
-                    let mut tokenizer = this.borrow_mut(&guard);
-                    tokenizer.tokenizer.with_decoder(instance);
-                }
-
-                Ok(cx.undefined().upcast())
-            } else {
-                cx.throw_error("The Decoder is already being used in another Tokenizer")
+                let decoder = decoder.borrow(&guard);
+                decoder.decoder.clone().unwrap()
+            };
+            let mut this = cx.this();
+            {
+                let guard = cx.lock();
+                let mut tokenizer = this.borrow_mut(&guard);
+                tokenizer.tokenizer.with_decoder(decoder);
             }
+            Ok(cx.undefined().upcast())
         }
     }
 }

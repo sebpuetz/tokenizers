@@ -1,12 +1,25 @@
 extern crate tokenizers as tk;
+use std::sync::Arc;
 
-use crate::container::Container;
-use crate::extraction::*;
 use neon::prelude::*;
+use serde::{Serialize, Deserialize};
+use tk::decoders::DecoderWrapper;
+
+use crate::extraction::*;
 
 /// Decoder
 pub struct Decoder {
-    pub decoder: Container<dyn tk::tokenizer::Decoder>,
+    pub decoder: Option<JsInitDecoder>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct JsInitDecoder(pub Arc<DecoderWrapper>);
+
+#[typetag::serde]
+impl tk::Decoder for JsInitDecoder {
+    fn decode(&self, tokens: Vec<String>) -> tk::Result<String> {
+        self.0.decode(tokens)
+    }
 }
 
 declare_types! {
@@ -14,7 +27,7 @@ declare_types! {
         init(_) {
             // This should not be called from JS
             Ok(Decoder {
-                decoder: Container::Empty
+                decoder: None
             })
         }
     }
@@ -27,7 +40,7 @@ fn byte_level(mut cx: FunctionContext) -> JsResult<JsDecoder> {
     decoder
         .borrow_mut(&guard)
         .decoder
-        .make_owned(Box::new(tk::decoders::byte_level::ByteLevel::default()));
+        .replace(JsInitDecoder(Arc::new(tk::decoders::byte_level::ByteLevel::default().into())));
     Ok(decoder)
 }
 
@@ -40,9 +53,9 @@ fn wordpiece(mut cx: FunctionContext) -> JsResult<JsDecoder> {
 
     let mut decoder = JsDecoder::new::<_, JsDecoder, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    decoder.borrow_mut(&guard).decoder.make_owned(Box::new(
-        tk::decoders::wordpiece::WordPiece::new(prefix, cleanup),
-    ));
+    decoder.borrow_mut(&guard).decoder.replace(JsInitDecoder(Arc::new(
+        tk::decoders::wordpiece::WordPiece::new(prefix, cleanup).into(),
+    )));
     Ok(decoder)
 }
 
@@ -53,9 +66,9 @@ fn metaspace(mut cx: FunctionContext) -> JsResult<JsDecoder> {
 
     let mut decoder = JsDecoder::new::<_, JsDecoder, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    decoder.borrow_mut(&guard).decoder.make_owned(Box::new(
-        tk::decoders::metaspace::Metaspace::new(replacement, add_prefix_space),
-    ));
+    decoder.borrow_mut(&guard).decoder.replace(JsInitDecoder(Arc::new(
+        tk::decoders::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
+    )));
     Ok(decoder)
 }
 
@@ -70,7 +83,7 @@ fn bpe_decoder(mut cx: FunctionContext) -> JsResult<JsDecoder> {
     decoder
         .borrow_mut(&guard)
         .decoder
-        .make_owned(Box::new(tk::decoders::bpe::BPEDecoder::new(suffix)));
+        .replace(JsInitDecoder(Arc::new(tk::decoders::bpe::BPEDecoder::new(suffix).into())));
     Ok(decoder)
 }
 

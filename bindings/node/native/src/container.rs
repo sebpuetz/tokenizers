@@ -10,7 +10,6 @@
 /// and just keep a pointer in the Node object.
 pub enum Container<T: ?Sized> {
     Owned(Box<T>),
-    Pointer(*mut T),
     Empty,
 }
 
@@ -18,20 +17,6 @@ impl<T> Container<T>
 where
     T: ?Sized,
 {
-    pub fn from_ref<R: AsRef<T>>(reference: R) -> Self {
-        let content: *const T = reference.as_ref();
-        Container::Pointer(content as *mut _)
-    }
-
-    /// Consumes ourself and return the Boxed element if we have the ownership, None otherwise.
-    pub fn take(self) -> Option<Box<T>> {
-        match self {
-            Container::Owned(obj) => Some(obj),
-            Container::Pointer(_) => None,
-            Container::Empty => None,
-        }
-    }
-
     /// Replace an empty content by the new provided owned one, otherwise do nothing
     pub fn make_owned(&mut self, o: Box<T>) {
         if let Container::Empty = self {
@@ -42,35 +27,12 @@ where
         }
     }
 
-    /// Return the owned T, keeping a Pointer to it if we currently own it. None otherwise
-    pub fn make_pointer(&mut self) -> Option<Box<T>> {
-        if let Container::Owned(_) = self {
-            unsafe {
-                let old_container = std::ptr::read(self);
-                let ptr = Box::into_raw(old_container.take().unwrap());
-                let new_container = Container::Pointer(ptr);
-                std::ptr::write(self, new_container);
-
-                Some(Box::from_raw(ptr))
-            }
-        } else {
-            None
-        }
-    }
-
     pub fn execute<F, U>(&self, closure: F) -> U
     where
         F: FnOnce(Option<&Box<T>>) -> U,
     {
         match self {
             Container::Owned(val) => closure(Some(val)),
-            Container::Pointer(ptr) => unsafe {
-                let val = Box::from_raw(*ptr);
-                let res = closure(Some(&val));
-                // We call this to make sure we don't drop the Box
-                Box::into_raw(val);
-                res
-            },
             Container::Empty => closure(None),
         }
     }
@@ -81,13 +43,6 @@ where
     {
         match self {
             Container::Owned(val) => closure(Some(val)),
-            Container::Pointer(ptr) => unsafe {
-                let mut val = Box::from_raw(*ptr);
-                let res = closure(Some(&mut val));
-                // We call this to make sure we don't drop the Box
-                Box::into_raw(val);
-                res
-            },
             Container::Empty => closure(None),
         }
     }

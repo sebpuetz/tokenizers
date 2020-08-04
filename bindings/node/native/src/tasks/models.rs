@@ -2,9 +2,9 @@ extern crate tokenizers as tk;
 
 use crate::models::*;
 use neon::prelude::*;
+use std::sync::Arc;
 use tk::models::bpe::{BpeBuilder, BPE};
 use tk::models::wordpiece::{WordPiece, WordPieceBuilder};
-use std::sync::Arc;
 
 pub struct WordPieceFromFilesTask(Option<WordPieceBuilder>);
 impl WordPieceFromFilesTask {
@@ -69,7 +69,10 @@ impl Task for BPEFromFilesTask {
 
         let mut js_model = JsModel::new::<_, JsModel, _>(&mut cx, vec![])?;
         let guard = cx.lock();
-        js_model.borrow_mut(&guard).model.replace(JsInitModel(Arc::new(bpe.into())));
+        js_model
+            .borrow_mut(&guard)
+            .model
+            .replace(JsInitModel(Arc::new(bpe.into())));
 
         Ok(js_model.upcast())
     }

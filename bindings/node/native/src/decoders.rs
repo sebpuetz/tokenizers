@@ -2,7 +2,7 @@ extern crate tokenizers as tk;
 use std::sync::Arc;
 
 use neon::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tk::decoders::DecoderWrapper;
 
 use crate::extraction::*;
@@ -40,7 +40,9 @@ fn byte_level(mut cx: FunctionContext) -> JsResult<JsDecoder> {
     decoder
         .borrow_mut(&guard)
         .decoder
-        .replace(JsInitDecoder(Arc::new(tk::decoders::byte_level::ByteLevel::default().into())));
+        .replace(JsInitDecoder(Arc::new(
+            tk::decoders::byte_level::ByteLevel::default().into(),
+        )));
     Ok(decoder)
 }
 
@@ -53,9 +55,12 @@ fn wordpiece(mut cx: FunctionContext) -> JsResult<JsDecoder> {
 
     let mut decoder = JsDecoder::new::<_, JsDecoder, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    decoder.borrow_mut(&guard).decoder.replace(JsInitDecoder(Arc::new(
-        tk::decoders::wordpiece::WordPiece::new(prefix, cleanup).into(),
-    )));
+    decoder
+        .borrow_mut(&guard)
+        .decoder
+        .replace(JsInitDecoder(Arc::new(
+            tk::decoders::wordpiece::WordPiece::new(prefix, cleanup).into(),
+        )));
     Ok(decoder)
 }
 
@@ -66,9 +71,12 @@ fn metaspace(mut cx: FunctionContext) -> JsResult<JsDecoder> {
 
     let mut decoder = JsDecoder::new::<_, JsDecoder, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    decoder.borrow_mut(&guard).decoder.replace(JsInitDecoder(Arc::new(
-        tk::decoders::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
-    )));
+    decoder
+        .borrow_mut(&guard)
+        .decoder
+        .replace(JsInitDecoder(Arc::new(
+            tk::decoders::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
+        )));
     Ok(decoder)
 }
 
@@ -83,7 +91,9 @@ fn bpe_decoder(mut cx: FunctionContext) -> JsResult<JsDecoder> {
     decoder
         .borrow_mut(&guard)
         .decoder
-        .replace(JsInitDecoder(Arc::new(tk::decoders::bpe::BPEDecoder::new(suffix).into())));
+        .replace(JsInitDecoder(Arc::new(
+            tk::decoders::bpe::BPEDecoder::new(suffix).into(),
+        )));
     Ok(decoder)
 }
 

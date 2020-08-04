@@ -3,16 +3,16 @@ extern crate tokenizers as tk;
 use crate::decoders::JsDecoder;
 use crate::encoding::JsEncoding;
 use crate::extraction::*;
-use crate::models::{JsModel, JsInitModel};
+use crate::models::{JsInitModel, JsModel};
 use crate::normalizers::JsNormalizer;
 use crate::pre_tokenizers::JsPreTokenizer;
 use crate::processors::JsPostProcessor;
 use crate::tasks::tokenizer::{DecodeTask, EncodeTask, WorkingTokenizer};
+use decoders::JsInitDecoder;
 use neon::prelude::*;
 use normalizers::JsNormalizerWrapper;
 use pre_tokenizers::JsInitPreTokenizer;
 use processors::JsInitProcessor;
-use decoders::JsInitDecoder;
 
 // AddedToken
 
@@ -345,7 +345,13 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer, JsInitProcessor, JsInitDecoder>;
+pub type TkTokenizer = tk::Tokenizer<
+    JsInitModel,
+    JsNormalizerWrapper,
+    JsInitPreTokenizer,
+    JsInitProcessor,
+    JsInitDecoder,
+>;
 
 /// Tokenizer
 pub struct Tokenizer {

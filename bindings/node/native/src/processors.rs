@@ -27,7 +27,6 @@ impl tk::PostProcessor for JsInitProcessor {
     ) -> tk::Result<tk::Encoding> {
         self.0.process(encoding, pair_encoding, add_special_tokens)
     }
-
 }
 
 declare_types! {
@@ -48,9 +47,12 @@ fn bert_processing(mut cx: FunctionContext) -> JsResult<JsPostProcessor> {
 
     let mut processor = JsPostProcessor::new::<_, JsPostProcessor, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    processor.borrow_mut(&guard).processor.replace(JsInitProcessor(Arc::new(
-        tk::processors::bert::BertProcessing::new(sep, cls).into(),
-    )));
+    processor
+        .borrow_mut(&guard)
+        .processor
+        .replace(JsInitProcessor(Arc::new(
+            tk::processors::bert::BertProcessing::new(sep, cls).into(),
+        )));
     Ok(processor)
 }
 

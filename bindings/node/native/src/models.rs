@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use neon::prelude::*;
+use serde::{Deserialize, Serialize};
 use tk::models::{bpe::BpeBuilder, wordpiece::WordPieceBuilder, ModelWrapper};
 use tk::Model as _;
-use serde::{Deserialize, Serialize};
 
 use crate::extraction::*;
 use crate::tasks::models::{BPEFromFilesTask, WordPieceFromFilesTask};
@@ -129,7 +129,10 @@ pub fn bpe_empty(mut cx: FunctionContext) -> JsResult<JsModel> {
     let bpe = tk::models::bpe::BPE::default();
 
     let guard = cx.lock();
-    model.borrow_mut(&guard).model.replace(JsInitModel(Arc::new(bpe.into())));
+    model
+        .borrow_mut(&guard)
+        .model
+        .replace(JsInitModel(Arc::new(bpe.into())));
 
     Ok(model)
 }

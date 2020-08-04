@@ -62,9 +62,12 @@ fn byte_level_alphabet(mut cx: FunctionContext) -> JsResult<JsValue> {
 fn whitespace(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
-        tk::pre_tokenizers::whitespace::Whitespace::default().into(),
-    )));
+    pretok
+        .borrow_mut(&guard)
+        .pretok
+        .replace(JsInitPreTokenizer(Arc::new(
+            tk::pre_tokenizers::whitespace::Whitespace::default().into(),
+        )));
     Ok(pretok)
 }
 
@@ -75,7 +78,9 @@ fn whitespace_split(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     pretok
         .borrow_mut(&guard)
         .pretok
-        .replace(JsInitPreTokenizer(Arc::new(tk::pre_tokenizers::whitespace::WhitespaceSplit.into())));
+        .replace(JsInitPreTokenizer(Arc::new(
+            tk::pre_tokenizers::whitespace::WhitespaceSplit.into(),
+        )));
     Ok(pretok)
 }
 
@@ -86,7 +91,9 @@ fn bert_pre_tokenizer(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     pretok
         .borrow_mut(&guard)
         .pretok
-        .replace(JsInitPreTokenizer(Arc::new(tk::pre_tokenizers::bert::BertPreTokenizer.into())));
+        .replace(JsInitPreTokenizer(Arc::new(
+            tk::pre_tokenizers::bert::BertPreTokenizer.into(),
+        )));
     Ok(pretok)
 }
 
@@ -97,9 +104,12 @@ fn metaspace(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
 
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
-        tk::pre_tokenizers::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
-    )));
+    pretok
+        .borrow_mut(&guard)
+        .pretok
+        .replace(JsInitPreTokenizer(Arc::new(
+            tk::pre_tokenizers::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
+        )));
     Ok(pretok)
 }
 
@@ -109,9 +119,12 @@ fn char_delimiter_split(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
 
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
-        tk::pre_tokenizers::delimiter::CharDelimiterSplit::new(delimiter).into(),
-    )));
+    pretok
+        .borrow_mut(&guard)
+        .pretok
+        .replace(JsInitPreTokenizer(Arc::new(
+            tk::pre_tokenizers::delimiter::CharDelimiterSplit::new(delimiter).into(),
+        )));
 
     Ok(pretok)
 }

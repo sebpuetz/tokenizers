@@ -2,9 +2,9 @@ extern crate tokenizers as tk;
 use std::sync::Arc;
 
 use neon::prelude::*;
-use tk::normalizers::NormalizerWrapper;
-use serde::{Serialize, Serializer};
 use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
+use tk::normalizers::NormalizerWrapper;
 
 use crate::extraction::*;
 
@@ -56,15 +56,15 @@ fn bert_normalizer(mut cx: FunctionContext) -> JsResult<JsNormalizer> {
 
     let mut normalizer = JsNormalizer::new::<_, JsNormalizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    normalizer
-        .borrow_mut(&guard)
-        .normalizer
-        .replace(tk::normalizers::bert::BertNormalizer::new(
+    normalizer.borrow_mut(&guard).normalizer.replace(
+        tk::normalizers::bert::BertNormalizer::new(
             options.clean_text,
             options.handle_chinese_chars,
             options.strip_accents,
             options.lowercase,
-        ).into());
+        )
+        .into(),
+    );
     Ok(normalizer)
 }
 
@@ -169,8 +169,8 @@ pub enum JsNormalizerWrapper {
 
 impl Serialize for JsNormalizerWrapper {
     fn serialize<S>(&self, serializer: S) -> Result<<S as Serializer>::Ok, <S as Serializer>::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         match self {
             JsNormalizerWrapper::Sequence(seq) => {
@@ -185,8 +185,8 @@ impl Serialize for JsNormalizerWrapper {
 }
 
 impl<I> From<I> for JsNormalizerWrapper
-    where
-        I: Into<NormalizerWrapper>,
+where
+    I: Into<NormalizerWrapper>,
 {
     fn from(norm: I) -> Self {
         JsNormalizerWrapper::Wrapped(Arc::new(norm.into()))
@@ -194,8 +194,8 @@ impl<I> From<I> for JsNormalizerWrapper
 }
 
 impl<I> From<I> for Normalizer
-    where
-        I: Into<NormalizerWrapper>,
+where
+    I: Into<NormalizerWrapper>,
 {
     fn from(norm: I) -> Self {
         Normalizer {
@@ -215,7 +215,6 @@ impl tk::Normalizer for JsNormalizerWrapper {
         }
     }
 }
-
 
 /// Register everything here
 pub fn register(m: &mut ModuleContext, prefix: &str) -> NeonResult<()> {

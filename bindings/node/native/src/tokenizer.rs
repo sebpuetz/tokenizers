@@ -12,6 +12,7 @@ use crate::tasks::tokenizer::{DecodeTask, EncodeTask, WorkingTokenizer};
 use neon::prelude::*;
 use normalizers::JsNormalizerWrapper;
 use pre_tokenizers::JsInitPreTokenizer;
+use processors::JsInitProcessor;
 
 // AddedToken
 
@@ -344,7 +345,7 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer>;
+pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer, JsInitProcessor>;
 
 /// Tokenizer
 pub struct Tokenizer {
@@ -910,15 +911,14 @@ declare_types! {
                 let this = cx.this();
                 let guard = cx.lock();
                 let borrowed = this.borrow(&guard);
-                let processor = borrowed.tokenizer.get_post_processor();
-                processor.map(|processor| { Container::from_ref(processor) })
+                borrowed.tokenizer.get_post_processor().cloned()
             };
 
             if let Some(processor) = processor {
                 let mut js_processor =
                     JsPostProcessor::new::<_, JsPostProcessor, _>(&mut cx, vec![])?;
                 let guard = cx.lock();
-                js_processor.borrow_mut(&guard).processor = processor;
+                js_processor.borrow_mut(&guard).processor.replace(processor);
 
                 Ok(js_processor.upcast())
             } else {
@@ -930,23 +930,19 @@ declare_types! {
             // setPostProcessor(processor: PostProcessor)
             check_tokenizer_can_be_modified!(cx);
 
-            let mut processor = cx.argument::<JsPostProcessor>(0)?;
-            if let Some(instance) = {
+            let processor = cx.argument::<JsPostProcessor>(0)?;
+            let processor = {
                 let guard = cx.lock();
-                let mut processor = processor.borrow_mut(&guard);
-                processor.processor.make_pointer()
-            } {
-                let mut this = cx.this();
-                {
-                    let guard = cx.lock();
-                    let mut tokenizer = this.borrow_mut(&guard);
-                    tokenizer.tokenizer.with_post_processor(instance);
-                }
-
-                Ok(cx.undefined().upcast())
-            } else {
-                cx.throw_error("The PostProcessor is already being used in another Tokenizer")
+                let processor = processor.borrow(&guard);
+                processor.processor.clone().unwrap()
+            };
+            let mut this = cx.this();
+            {
+                let guard = cx.lock();
+                let mut tokenizer = this.borrow_mut(&guard);
+                tokenizer.tokenizer.with_post_processor(processor);
             }
+            Ok(cx.undefined().upcast())
         }
 
         method getDecoder(mut cx) {

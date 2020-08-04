@@ -1,12 +1,33 @@
 extern crate tokenizers as tk;
+use std::sync::Arc;
 
-use crate::container::Container;
-use crate::extraction::*;
 use neon::prelude::*;
+use tk::processors::PostProcessorWrapper;
+
+use crate::extraction::*;
 
 /// Processor
 pub struct Processor {
-    pub processor: Container<dyn tk::tokenizer::PostProcessor>,
+    pub processor: Option<JsInitProcessor>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct JsInitProcessor(pub Arc<PostProcessorWrapper>);
+
+#[typetag::serde]
+impl tk::PostProcessor for JsInitProcessor {
+    fn added_tokens(&self, is_pair: bool) -> usize {
+        self.0.added_tokens(is_pair)
+    }
+    fn process(
+        &self,
+        encoding: tk::Encoding,
+        pair_encoding: Option<tk::Encoding>,
+        add_special_tokens: bool,
+    ) -> tk::Result<tk::Encoding> {
+        self.0.process(encoding, pair_encoding, add_special_tokens)
+    }
+
 }
 
 declare_types! {
@@ -14,7 +35,7 @@ declare_types! {
         init(_) {
             // This should not be called from JS
             Ok(Processor {
-                processor: Container::Empty
+                processor: None
             })
         }
     }
@@ -27,9 +48,9 @@ fn bert_processing(mut cx: FunctionContext) -> JsResult<JsPostProcessor> {
 
     let mut processor = JsPostProcessor::new::<_, JsPostProcessor, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    processor.borrow_mut(&guard).processor.make_owned(Box::new(
-        tk::processors::bert::BertProcessing::new(sep, cls),
-    ));
+    processor.borrow_mut(&guard).processor.replace(JsInitProcessor(Arc::new(
+        tk::processors::bert::BertProcessing::new(sep, cls).into(),
+    )));
     Ok(processor)
 }
 
@@ -56,7 +77,7 @@ fn roberta_processing(mut cx: FunctionContext) -> JsResult<JsPostProcessor> {
     js_processor
         .borrow_mut(&guard)
         .processor
-        .make_owned(Box::new(processor));
+        .replace(JsInitProcessor(Arc::new(processor.into())));
     Ok(js_processor)
 }
 
@@ -73,7 +94,7 @@ fn bytelevel(mut cx: FunctionContext) -> JsResult<JsPostProcessor> {
     processor
         .borrow_mut(&guard)
         .processor
-        .make_owned(Box::new(byte_level));
+        .replace(JsInitProcessor(Arc::new(byte_level.into())));
     Ok(processor)
 }
 

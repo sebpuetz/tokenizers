@@ -1,12 +1,24 @@
 extern crate tokenizers as tk;
+use std::sync::Arc;
 
-use crate::container::Container;
-use crate::extraction::*;
 use neon::prelude::*;
+use tk::pre_tokenizers::PreTokenizerWrapper;
+
+use crate::extraction::*;
 
 /// PreTokenizers
 pub struct PreTokenizer {
-    pub pretok: Container<dyn tk::tokenizer::PreTokenizer>,
+    pub pretok: Option<JsInitPreTokenizer>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct JsInitPreTokenizer(pub Arc<PreTokenizerWrapper>);
+
+#[typetag::serde]
+impl tk::PreTokenizer for JsInitPreTokenizer {
+    fn pre_tokenize(&self, normalized: &mut tk::PreTokenizedString) -> tk::Result<()> {
+        self.0.pre_tokenize(normalized)
+    }
 }
 
 declare_types! {
@@ -14,7 +26,7 @@ declare_types! {
         init(_) {
             // This should not be called from JS
             Ok(PreTokenizer {
-                pretok: Container::Empty
+                pretok: None
             })
         }
     }
@@ -32,7 +44,7 @@ fn byte_level(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     pretok
         .borrow_mut(&guard)
         .pretok
-        .make_owned(Box::new(byte_level));
+        .replace(JsInitPreTokenizer(Arc::new(byte_level.into())));
     Ok(pretok)
 }
 
@@ -50,9 +62,9 @@ fn byte_level_alphabet(mut cx: FunctionContext) -> JsResult<JsValue> {
 fn whitespace(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.make_owned(Box::new(
-        tk::pre_tokenizers::whitespace::Whitespace::default(),
-    ));
+    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
+        tk::pre_tokenizers::whitespace::Whitespace::default().into(),
+    )));
     Ok(pretok)
 }
 
@@ -63,7 +75,7 @@ fn whitespace_split(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     pretok
         .borrow_mut(&guard)
         .pretok
-        .make_owned(Box::new(tk::pre_tokenizers::whitespace::WhitespaceSplit));
+        .replace(JsInitPreTokenizer(Arc::new(tk::pre_tokenizers::whitespace::WhitespaceSplit.into())));
     Ok(pretok)
 }
 
@@ -74,7 +86,7 @@ fn bert_pre_tokenizer(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
     pretok
         .borrow_mut(&guard)
         .pretok
-        .make_owned(Box::new(tk::pre_tokenizers::bert::BertPreTokenizer));
+        .replace(JsInitPreTokenizer(Arc::new(tk::pre_tokenizers::bert::BertPreTokenizer.into())));
     Ok(pretok)
 }
 
@@ -85,9 +97,9 @@ fn metaspace(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
 
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.make_owned(Box::new(
-        tk::pre_tokenizers::metaspace::Metaspace::new(replacement, add_prefix_space),
-    ));
+    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
+        tk::pre_tokenizers::metaspace::Metaspace::new(replacement, add_prefix_space).into(),
+    )));
     Ok(pretok)
 }
 
@@ -97,9 +109,9 @@ fn char_delimiter_split(mut cx: FunctionContext) -> JsResult<JsPreTokenizer> {
 
     let mut pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
     let guard = cx.lock();
-    pretok.borrow_mut(&guard).pretok.make_owned(Box::new(
-        tk::pre_tokenizers::delimiter::CharDelimiterSplit::new(delimiter),
-    ));
+    pretok.borrow_mut(&guard).pretok.replace(JsInitPreTokenizer(Arc::new(
+        tk::pre_tokenizers::delimiter::CharDelimiterSplit::new(delimiter).into(),
+    )));
 
     Ok(pretok)
 }

@@ -11,6 +11,7 @@ use crate::processors::JsPostProcessor;
 use crate::tasks::tokenizer::{DecodeTask, EncodeTask, WorkingTokenizer};
 use neon::prelude::*;
 use normalizers::JsNormalizerWrapper;
+use pre_tokenizers::JsInitPreTokenizer;
 
 // AddedToken
 
@@ -343,7 +344,7 @@ pub struct PaddingParamsDef {
 #[serde(transparent)]
 pub struct PaddingParams(#[serde(with = "PaddingParamsDef")] pub tk::PaddingParams);
 
-pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper>;
+pub type TkTokenizer = tk::Tokenizer<JsInitModel, JsNormalizerWrapper, JsInitPreTokenizer>;
 
 /// Tokenizer
 pub struct Tokenizer {
@@ -869,14 +870,13 @@ declare_types! {
                 let this = cx.this();
                 let guard = cx.lock();
                 let borrowed = this.borrow(&guard);
-                let pretok = borrowed.tokenizer.get_pre_tokenizer();
-                pretok.map(|pretok| { Container::from_ref(pretok) })
+                borrowed.tokenizer.get_pre_tokenizer().cloned()
             };
 
             if let Some(pretok) = pretok {
                 let mut js_pretok = JsPreTokenizer::new::<_, JsPreTokenizer, _>(&mut cx, vec![])?;
                 let guard = cx.lock();
-                js_pretok.borrow_mut(&guard).pretok = pretok;
+                js_pretok.borrow_mut(&guard).pretok.replace(pretok);
 
                 Ok(js_pretok.upcast())
             } else {
@@ -888,23 +888,19 @@ declare_types! {
             // setPreTokenizer(pretokenizer: PreTokenizer)
             check_tokenizer_can_be_modified!(cx);
 
-            let mut pretok = cx.argument::<JsPreTokenizer>(0)?;
-            if let Some(instance) = {
+            let pretok = cx.argument::<JsPreTokenizer>(0)?;
+            let pretok = {
                 let guard = cx.lock();
-                let mut pretok = pretok.borrow_mut(&guard);
-                pretok.pretok.make_pointer()
-            } {
-                let mut this = cx.this();
-                {
-                    let guard = cx.lock();
-                    let mut tokenizer = this.borrow_mut(&guard);
-                    tokenizer.tokenizer.with_pre_tokenizer(instance);
-                }
-
-                Ok(cx.undefined().upcast())
-            } else {
-                cx.throw_error("The PreTokenizer is already being used in another Tokenizer")
+                let pretok = pretok.borrow(&guard);
+                pretok.pretok.clone().unwrap()
+            };
+            let mut this = cx.this();
+            {
+                let guard = cx.lock();
+                let mut tokenizer = this.borrow_mut(&guard);
+                tokenizer.tokenizer.with_pre_tokenizer(pretok);
             }
+            Ok(cx.undefined().upcast())
         }
 
         method getPostProcessor(mut cx) {

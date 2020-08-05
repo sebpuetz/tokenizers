@@ -1,8 +1,6 @@
 //! [WordPiece](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/37842.pdf)
 //! model.
 
-use crate::models::bpe::BPE;
-use crate::tokenizer::{Model, Result, Token};
 use std::{
     collections::HashMap,
     fmt,
@@ -12,6 +10,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::models::bpe::BPE;
+use crate::tokenizer::{Model, Result, Token};
+use piece_iter::PieceIter;
+
+mod piece_iter;
 mod serialization;
 mod trainer;
 pub use trainer::*;
@@ -219,53 +222,20 @@ impl Model for WordPiece {
                 offsets: (0, char_len),
             }]);
         }
-
-        let mut is_bad = false;
-        let mut start = 0;
-        let mut sub_tokens: Vec<Token> = vec![];
-        let chars = sequence.chars().collect::<Vec<_>>();
-
-        while start < chars.len() {
-            let mut end = chars.len();
-            let mut cur_str = None;
-
-            while start < end {
-                let mut substr = chars[start..end].iter().collect::<String>();
-                if start > 0 {
-                    substr = format!("{}{}", self.continuing_subword_prefix, substr);
+        let mut tokens = Vec::new();
+        for piece in PieceIter::new(sequence, self)? {
+            match piece {
+                Ok((id, val, offsets)) => tokens.push(Token::new(id, val.into(), offsets)),
+                Err(unk) => {
+                    return Ok(vec![Token::new(
+                        unk,
+                        self.unk_token.clone(),
+                        (0, sequence.len()),
+                    )])
                 }
-                if self.vocab.contains_key(&substr) {
-                    cur_str = Some(Token {
-                        id: self.vocab[&substr],
-                        value: substr,
-                        offsets: (start, end),
-                    });
-                    break;
-                }
-                end -= 1;
             }
-
-            if cur_str.is_none() {
-                is_bad = true;
-                break;
-            }
-
-            sub_tokens.push(cur_str.unwrap());
-            start = end;
         }
-
-        if is_bad {
-            Ok(vec![Token {
-                value: self.unk_token.clone(),
-                id: *self
-                    .vocab
-                    .get(&self.unk_token)
-                    .ok_or(Error::MissingUnkToken)?,
-                offsets: (0, char_len),
-            }])
-        } else {
-            Ok(sub_tokens)
-        }
+        Ok(tokens)
     }
 
     fn token_to_id(&self, token: &str) -> Option<u32> {
@@ -307,5 +277,41 @@ mod tests {
     #[test]
     fn test_error_display() {
         assert!(format!("{}", Error::MissingUnkToken).contains("Missing [UNK] token"));
+    }
+
+    #[test]
+    fn wordpiece_tokenize() {
+        let pieces = vec![
+            "abcd".to_string(),
+            "##a".to_string(),
+            "##b".to_string(),
+            "##c".to_string(),
+            "##de".to_string(),
+            "[UNK]".to_string(),
+            "de".to_string(),
+        ];
+        let tok = WordPieceBuilder::default()
+            .vocab(
+                pieces
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(i, s)| (s, i as u32))
+                    .collect(),
+            )
+            .build()
+            .unwrap();
+
+        let tokens = tok.tokenize("abcddede").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::new(0, "abcd".to_string(), (0, 4)),
+                Token::new(4, "##de".to_string(), (4, 6)),
+                Token::new(4, "##de".to_string(), (6, 8))
+            ]
+        );
+        let tokens = tok.tokenize("ade").unwrap();
+        assert_eq!(tokens, vec![Token::new(5, "[UNK]".to_string(), (0, 3))]);
     }
 }
